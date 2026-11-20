@@ -1,26 +1,63 @@
 name: release
 
+# 合併到 main 時：若 plugin/komari-plugin.json 的版本號還沒有對應的 v<版本> 標籤，
+# 就自動跑測試、打包，並建立標籤與 Release（附上 cn-speedtest.zip）。
+# 版本號沒變的合併不會發布。也可以手動推送 v* 標籤或從 Actions 頁面手動執行。
+
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Decide release tag
+        id: ver
+        run: |
+          VERSION=$(node -p "require('./plugin/komari-plugin.json').version")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v${VERSION}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ] && git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "${TAG} 已經發布過，略過（要發新版請先提高 komari-plugin.json 的 version）"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "將發布 ${TAG}"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.ver.outputs.release == 'true'
         with:
           node-version: 22
+
       - name: Test and package
+        if: steps.ver.outputs.release == 'true'
         run: ./build.sh
+
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.ver.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.ver.outputs.tag }}
           files: dist/cn-speedtest.zip
           generate_release_notes: true
+          body: |
+            安裝：下載下方 Assets 的 `cn-speedtest.zip` → Komari 後台 → 插件 → 上傳（不要用「Source code」）。
