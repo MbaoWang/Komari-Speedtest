@@ -123,12 +123,31 @@ function parseCustomTargets(text) {
 
 // 把測速點展開成「地點+運營商」清單（泰爾測速每個點單獨執行一次，方便統計各點的重傳率）
 var ISPS = ["电信", "联通", "移动"];
-function expandPoints(points) {
+// 運營商選擇：回傳 ["电信","联通","移动"] 的子集（依固定順序）；空陣列 = 三網全部
+var ISP_ALIASES = {
+  "电信": ["电信", "電信", "ct", "telecom", "chinanet", "t"],
+  "联通": ["联通", "聯通", "cu", "unicom", "u"],
+  "移动": ["移动", "移動", "cm", "mobile", "cmcc", "m"]
+};
+function normIsps(v) {
+  var list = Array.isArray(v) ? v : String(v || "").split(/[\s,，、;；|]+/);
+  var picked = {};
+  list.forEach(function (x) {
+    var t = String(x || "").trim().toLowerCase();
+    if (!t || t === "all" || t === "全部" || t === "三網" || t === "三网") return;
+    for (var k in ISP_ALIASES) if (ISP_ALIASES[k].indexOf(t) >= 0) picked[k] = true;
+  });
+  var out = ISPS.filter(function (k) { return picked[k]; });
+  return out.length === 3 ? [] : out;
+}
+
+function expandPoints(points, isps) {
   var list = points ? points.split(",") : ["北京", "上海", "广东"];
+  var use = isps && isps.length ? isps : ISPS;
   var out = [];
   list.forEach(function (p) {
     if (/(电信|联通|移动)$/.test(p)) out.push(p);
-    else ISPS.forEach(function (isp) { out.push(p + isp); });
+    else use.forEach(function (isp) { out.push(p + isp); });
   });
   return out.filter(function (p, i, a) { return a.indexOf(p) === i; }).slice(0, 36);
 }
@@ -139,9 +158,10 @@ function estimateSeconds(opts) {
   var t = 30;
   if (opts.ping) t += 90 + Math.ceil((opts.pingCount || 20) * 1.5) * fams;
   if (opts.speed) {
-    var points = expandPoints(opts.points || "").length;
+    var points = expandPoints(opts.points || "", opts.isps).length;
     var modes = opts.mode === "both" ? 2 : 1;
     t += 120 + points * (8 + fams * (modes * (2 * (opts.duration || 5) + 6) + 6));
+    if (opts.retries) t += Math.ceil(points * 0.3) * opts.retries * fams * (modes * (2 * (opts.duration || 5) + 6) + 6); // 預估約三成測速點需要重測
   }
   return Math.min(t, 3600);
 }
@@ -196,7 +216,7 @@ var RTX_AWK = [
 ].join("\n");
 
 // opts: { runId, ping, speed, family, points, mode, duration, pingCount, parallel,
-//         provinceFilter, getNodesUrl, taierUrl, customTargets }
+//         provinceFilter, getNodesUrl, taierUrl, customTargets, isps, retries }
 function buildRemoteCommand(opts) {
   var runId = validateRunId(opts.runId);
   var family = normFamily(opts.family);
@@ -209,7 +229,9 @@ function buildRemoteCommand(opts) {
   var getNodesUrl = normUrl(opts.getNodesUrl, DEFAULT_GETNODES_URL);
   var taierUrl = normUrl(opts.taierUrl, DEFAULT_TAIER_URL);
   var custom = parseCustomTargets(opts.customTargets);
-  var est = estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: duration, pingCount: pingCount });
+  var isps = normIsps(opts.isps);
+  var retries = clampInt(opts.retries, 0, 3, 1);
+  var est = estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: duration, pingCount: pingCount, isps: isps, retries: retries });
   var fams = family === "both" ? "4 6" : family;
 
   var L = [];
@@ -252,9 +274,15 @@ function buildRemoteCommand(opts) {
       L.push("KCST_CUSTOM");
     }
     L.push(
-      "awk -F'\\t' -v fams=' " + fams + " ' -v provs=" + shQuote(provFilter) + " '",
+      "awk -F'\\t' -v fams=' " + fams + " ' -v provs=" + shQuote(provFilter) + " -v isps=" + shQuote(isps.join(" ")) + " '",
       '  function pick(p,  n,i,a){ if(provs=="") return 1; n=split(provs,a,","); for(i=1;i<=n;i++){ if(a[i]!="" && (index(p,a[i]) || index(a[i],p))) return 1 } return 0 }',
-      '  ($1=="cdn" || $1=="custom") && index(fams, " " $2 " ") && $6!="" && pick($3) {',
+      // 運營商篩選：中文（簡 / 繁）或英文代號
+      '  function pickIsp(s,  l){ if(isps=="") return 1; l=tolower(s);',
+      '    if(index(isps,"电信") && (index(s,"电信") || index(s,"電信") || l ~ /^(ct|telecom|chinanet)/)) return 1;',
+      '    if(index(isps,"联通") && (index(s,"联通") || index(s,"聯通") || l ~ /^(cu|unicom)/)) return 1;',
+      '    if(index(isps,"移动") && (index(s,"移动") || index(s,"移動") || l ~ /^(cm|mobile)/)) return 1;',
+      '    return 0 }',
+      '  ($1=="cdn" || $1=="custom") && index(fams, " " $2 " ") && $6!="" && pick($3) && pickIsp($4) {',
       '    p=$3; s=$4; h=$5; if(p=="")p="-"; if(s=="")s="-"; if(h=="")h=$6; port=$7; if(port=="")port=80;',
       '    gsub(/[|\\t "\\047\\\\]/,"",p); gsub(/[|\\t "\\047\\\\]/,"",s); gsub(/[|\\t "\\047\\\\]/,"",h);',
       '    print $2, p, s, h, $6, port',
@@ -278,7 +306,9 @@ function buildRemoteCommand(opts) {
   }
 
   if (opts.speed) {
-    var list = expandPoints(points);
+    var list = expandPoints(points, isps);
+    // 依模式判斷哪些欄位為 0 代表失敗
+    var failRe = mode === "single" ? "single_(up|down)_f" : mode === "multi" ? "multi_(up|down)_f" : "(single|multi)_(up|down)_f";
     var perRun = Math.max(60, (family === "both" ? 2 : 1) * ((mode === "both" ? 2 : 1) * (2 * duration + 6) + 6) + 60);
     var args = "--json --no-image --ip " + family + " --mode " + mode + " --duration " + duration;
     L.push(
@@ -302,21 +332,38 @@ function buildRemoteCommand(opts) {
       "    cat > \"$WORK/rtx.awk\" <<'KCST_RTX'",
       RTX_AWK,
       "KCST_RTX",
+      // 有欄位失敗（速度為 0）或沒有結果時自動重測，保留失敗最少的那一次
+      "    fails() { if ! grep -q '\"region\"' \"$1\" 2>/dev/null; then echo 99; else grep -oE '\"" + failRe + "\": *0(\\.0+)?(,|}|$)' \"$1\" | wc -l | tr -d ' '; fi; }",
+      "    RETRIES=" + retries,
       "    for P in " + list.map(shQuote).join(" ") + "; do",
-      '      echo "@@SPEED_BEGIN|$P"',
-      '      S0=$(snmp); : > "$WORK/ss.log"',
-      '      $TS "$BIN" ' + args + ' --points "$P" </dev/null >"$WORK/sp.out" 2>"$WORK/sp.err" &',
-      "      SPID=$!",
-      '      if [ "$HAS_SS" = 1 ]; then',
-      '        while kill -0 "$SPID" 2>/dev/null; do ss -tinp 2>/dev/null | awk -f "$WORK/ss.awk" >> "$WORK/ss.log"; sleep 0.3 2>/dev/null || sleep 1; done',
-      "      fi",
-      '      wait "$SPID"; rc=$?',
-      "      S1=$(snmp)",
-      '      cat "$WORK/sp.out"',
-      '      echo "@@SPEED_END|$rc"',
-      '      [ -s "$WORK/ss.log" ] && awk -f "$WORK/rtx.awk" "$WORK/ss.log"',
-      '      echo "@@RTXS|$S0|$S1"',
-      '      if [ "$rc" != 0 ]; then tr "\\r" "\\n" < "$WORK/sp.err" | grep -v "测速进度" | grep -v "^[[:space:]]*$" | tail -n 3 | sed "s/^/@@SPERR|/"; fi',
+      '      TRY=0; BEST=""; BESTF=999',
+      "      while :; do",
+      "        TRY=$((TRY+1))",
+      '        S0=$(snmp); : > "$WORK/ss.log"',
+      '        $TS "$BIN" ' + args + ' --points "$P" </dev/null >"$WORK/sp.out" 2>"$WORK/sp.err" &',
+      "        SPID=$!",
+      '        if [ "$HAS_SS" = 1 ]; then',
+      '          while kill -0 "$SPID" 2>/dev/null; do ss -tinp 2>/dev/null | awk -f "$WORK/ss.awk" >> "$WORK/ss.log"; sleep 0.3 2>/dev/null || sleep 1; done',
+      "        fi",
+      '        wait "$SPID"; rc=$?',
+      "        S1=$(snmp)",
+      '        F=$(fails "$WORK/sp.out")',
+      '        O="$WORK/try.$TRY"',
+      "        {",
+      '          echo "@@SPEED_BEGIN|$P"',
+      '          cat "$WORK/sp.out"',
+      '          echo "@@SPEED_END|$rc"',
+      '          [ -s "$WORK/ss.log" ] && awk -f "$WORK/rtx.awk" "$WORK/ss.log"',
+      '          echo "@@RTXS|$S0|$S1"',
+      '          if [ "$rc" != 0 ]; then tr "\\r" "\\n" < "$WORK/sp.err" | grep -v "测速进度" | grep -v "^[[:space:]]*$" | tail -n 3 | sed "s/^/@@SPERR|/"; fi',
+      '        } > "$O"',
+      '        if [ "$F" -lt "$BESTF" ]; then BESTF=$F; BEST="$O"; fi',
+      '        if [ "$F" -eq 0 ] || [ "$TRY" -gt "$RETRIES" ]; then break; fi',
+      "        sleep 3",
+      "      done",
+      '      cat "$BEST"',
+      '      if [ "$TRY" -gt 1 ]; then echo "@@RETRY|$P|$((TRY-1))|$BESTF"; fi',
+      '      rm -f "$WORK"/try.*',
       "    done",
       '  else echo "@@ERR|download|無法取得泰爾測速程式（可在插件設定填入鏡像網址）"; fi',
       "fi"
@@ -339,6 +386,7 @@ module.exports = {
   parseCustomTargets: parseCustomTargets,
   estimateSeconds: estimateSeconds,
   expandPoints: expandPoints,
+  normIsps: normIsps,
   buildRemoteCommand: buildRemoteCommand,
   clampInt: clampInt
 };

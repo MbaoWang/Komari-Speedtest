@@ -11,8 +11,7 @@ var parser = require("./parser.js");
 
 var STATE_FILE = "state.json";
 var POLL_MS = 5000;
-var MAX_JOBS_KEPT = 40;
-var MAX_JOBS_WITH_RESULTS = 15;
+var MAX_JOBS_WITH_RESULTS = 15; // 較舊的任務只留摘要，完整結果移除以控制檔案大小（每個節點的最新結果另外保存）
 
 function errText(e) { return e && e.message ? e.message : String(e); }
 function nowIso() { return new Date().toISOString(); }
@@ -53,7 +52,8 @@ function createJobManager(server, getConfig) {
     var s = load();
     // 只保留最近的任務，較舊任務移除結果內容以控制檔案大小
     s.jobs.sort(function (a, b) { return Date.parse(b.startedAt) - Date.parse(a.startedAt); });
-    if (s.jobs.length > MAX_JOBS_KEPT) s.jobs = s.jobs.slice(0, MAX_JOBS_KEPT);
+    var keep = getConfig().historyKeep || 40;
+    if (s.jobs.length > keep) s.jobs = s.jobs.slice(0, keep);
     s.jobs.forEach(function (j, i) { if (i >= MAX_JOBS_WITH_RESULTS && j.status !== "running") j.results = {}; });
     try {
       var p = storagePath();
@@ -121,6 +121,7 @@ function createJobManager(server, getConfig) {
     var family = remote.normFamily(spec.family || cfg.defaultFamily);
     var mode = remote.normMode(spec.mode || cfg.defaultMode);
     var points = remote.normPoints(spec.points !== undefined && spec.points !== null ? spec.points : cfg.defaultPoints);
+    var isps = remote.normIsps(spec.isps !== undefined && spec.isps !== null ? spec.isps : cfg.defaultIsps);
     var list = await nodes(true);
     var known = {};
     list.forEach(function (n) { known[n.uuid] = n; });
@@ -155,10 +156,14 @@ function createJobManager(server, getConfig) {
       provinceFilter: cfg.provinceFilter,
       getNodesUrl: cfg.getNodesUrl,
       taierUrl: cfg.taierUrl,
-      customTargets: cfg.customTargets
+      customTargets: cfg.customTargets,
+      isps: isps,
+      retries: cfg.speedRetries
     };
     var command = remote.buildRemoteCommand(opts);
-    var estSec = remote.estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: cfg.duration, pingCount: cfg.pingCount });
+    var estSec = remote.estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: cfg.duration, pingCount: cfg.pingCount, isps: isps, retries: cfg.speedRetries });
+    // 等待上限要涵蓋「每個測速點都重測」的最壞情況
+    var worstSec = remote.estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: cfg.duration, pingCount: cfg.pingCount, isps: isps, retries: 0 }) * (1 + (opts.speed ? cfg.speedRetries : 0));
     var resp = await server.call("admin:exec", { command: command, clients: uuids });
     var taskId = resp && resp.task_id ? String(resp.task_id) : "";
     if (!taskId) throw new Error("admin:exec 沒有回傳 task_id");
@@ -169,6 +174,7 @@ function createJobManager(server, getConfig) {
       family: family,
       points: points,
       mode: mode,
+      isps: isps,
       clients: uuids,
       names: {},
       skipped: { offline: offline, windows: winNodes, busy: busyList },
@@ -176,7 +182,7 @@ function createJobManager(server, getConfig) {
       startedAt: nowIso(),
       finishedAt: null,
       estimateSec: estSec,
-      deadlineAt: new Date(Date.now() + (estSec + 180) * 1000).toISOString(),
+      deadlineAt: new Date(Date.now() + (Math.min(worstSec, 3600) + 180) * 1000).toISOString(),
       origin: spec.origin || { kind: "web" },
       results: {},
       error: null
@@ -266,6 +272,15 @@ function createJobManager(server, getConfig) {
     save();
   }
 
+  // 清除已結束的任務紀錄（不影響各節點的最新結果與公開頁）
+  function clearFinished() {
+    var s = load();
+    var before = s.jobs.length;
+    s.jobs = s.jobs.filter(function (j) { return j.status === "running"; });
+    save();
+    return before - s.jobs.length;
+  }
+
   function getJob(id) { return load().jobs.filter(function (j) { return j.id === id; })[0] || null; }
   function jobs() { return load().jobs; }
   function latest(uuid) { return load().latest[uuid] || null; }
@@ -280,7 +295,7 @@ function createJobManager(server, getConfig) {
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
   }
 
-  return { start: start, shutdown: shutdown, run: run, setImage: setImage, cancel: cancel, nodes: nodes, nodeName: nodeName, getJob: getJob, jobs: jobs, latest: latest, running: running, on: on };
+  return { start: start, shutdown: shutdown, run: run, clearFinished: clearFinished, setImage: setImage, cancel: cancel, nodes: nodes, nodeName: nodeName, getJob: getJob, jobs: jobs, latest: latest, running: running, on: on };
 }
 
 module.exports = { createJobManager: createJobManager };

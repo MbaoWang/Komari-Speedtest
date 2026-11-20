@@ -23,7 +23,7 @@ for hi in range(0xA4, 0xC7):            # Big5 常用字
     for lo in list(range(0x40, 0x7F)) + list(range(0xA1, 0xFF)):
         try: chars.add(bytes([hi, lo]).decode("big5"))
         except UnicodeDecodeError: pass
-chars.update("\u3000×↓↑→←·•｜：，。、（）％—…≈✓✗№℃°±≤≥「」『』【】《》〈〉！？；～＋－／＝＜＞")
+chars.update("\u3000※×↓↑→←·•｜：，。、（）％—…≈✓✗№℃°±≤≥「」『』【】《》〈〉！？；～＋－／＝＜＞")
 chars = sorted(c for c in chars if c.isprintable() or c == "\u3000")
 
 font = ImageFont.truetype(FONT, SIZE, index=INDEX)

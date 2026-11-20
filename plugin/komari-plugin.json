@@ -13,7 +13,7 @@
     "en": "Test China Telecom/Unicom/Mobile IPv4/IPv6 latency and Taier speedtest from your nodes via the Komari agent, from the admin page or an interactive Telegram bot."
   },
   "author": "MbaoWang",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "url": "https://github.com/MbaoWang/komari-speedtest",
   "komari": ">=1.0.5",
   "entry": "script.js",
@@ -211,6 +211,23 @@
         }
       },
       {
+        "key": "default_isps",
+        "type": "string",
+        "default": "",
+        "name": {
+          "zh_TW": "預設運營商（留空=三網）",
+          "zh_CN": "默认运营商（留空=三网）",
+          "zh-CN": "默认运营商（留空=三网）",
+          "en": "Default ISPs (empty = all three)"
+        },
+        "help": {
+          "zh_TW": "填 電信 / 聯通 / 移動（可多個，逗號分隔），同時套用到延遲與測速",
+          "zh_CN": "填 电信 / 联通 / 移动，逗号分隔",
+          "zh-CN": "填 电信 / 联通 / 移动，逗号分隔",
+          "en": "电信 / 联通 / 移动, comma separated"
+        }
+      },
+      {
         "key": "default_mode",
         "type": "select",
         "options": "single,multi,both",
@@ -231,6 +248,23 @@
           "zh_CN": "每方向测速秒数（5~13）",
           "zh-CN": "每方向测速秒数（5~13）",
           "en": "Seconds per direction (5-13)"
+        }
+      },
+      {
+        "key": "speed_retries",
+        "type": "number",
+        "default": 1,
+        "name": {
+          "zh_TW": "測速失敗自動重測次數（0~3）",
+          "zh_CN": "测速失败自动重测次数（0~3）",
+          "zh-CN": "测速失败自动重测次数（0~3）",
+          "en": "Auto-retry failed speed points (0-3)"
+        },
+        "help": {
+          "zh_TW": "某個測速點有速度失敗（0）或沒有結果時自動重跑，保留失敗最少的一次。0 = 不重測",
+          "zh_CN": "某个测速点失败时自动重跑，保留失败最少的一次",
+          "zh-CN": "某个测速点失败时自动重跑，保留失败最少的一次",
+          "en": "Re-run a point whose result has a failed (0) value"
         }
       },
       {
@@ -281,6 +315,23 @@
           "zh_CN": "同时进行的任务上限",
           "zh-CN": "同时进行的任务上限",
           "en": "Max concurrent jobs"
+        }
+      },
+      {
+        "key": "history_keep",
+        "type": "number",
+        "default": 40,
+        "name": {
+          "zh_TW": "任務紀錄保留筆數（10~200）",
+          "zh_CN": "任务记录保留笔数（10~200）",
+          "zh-CN": "任务记录保留笔数（10~200）",
+          "en": "Jobs kept in history (10-200)"
+        },
+        "help": {
+          "zh_TW": "超過會自動刪除最舊的；最近 15 筆保留完整結果，更舊的只留摘要。各節點的最新結果另外保存，不受影響",
+          "zh_CN": "超过会自动删除最旧的",
+          "zh-CN": "超过会自动删除最旧的",
+          "en": "Oldest jobs are removed automatically"
         }
       },
       {

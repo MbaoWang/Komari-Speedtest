@@ -133,3 +133,34 @@ test("結果圖：PNG 結構與 deflate 可被 zlib 正確解壓", () => {
   const raw = zlib.inflateSync(Buffer.concat(idat));
   assert.strictEqual(raw.length, (width + 1) * height);
 });
+
+test("運營商選擇與測速點展開", () => {
+  assert.deepStrictEqual(remote.normIsps("電信, cm"), ["电信", "移动"]);
+  assert.deepStrictEqual(remote.normIsps(["电信", "联通", "移动"]), []);
+  assert.deepStrictEqual(remote.normIsps("全部"), []);
+  assert.deepStrictEqual(remote.expandPoints("上海,广东电信", ["移动"]), ["上海移动", "广东电信"]);
+  assert.strictEqual(remote.expandPoints("", ["联通"]).length, 3);
+  const cmd = remote.buildRemoteCommand({ runId: "isp-1", ping: true, speed: true, isps: ["联通"], retries: 2 });
+  assert.match(cmd, /-v isps='联通'/);
+  assert.match(cmd, /RETRIES=2/);
+  assert.match(cmd, /for P in '北京联通' '上海联通' '广东联通'/);
+});
+
+test("自動重測結果解析", () => {
+  const out = [
+    "@@BEGIN|2|Linux|x86_64",
+    "@@SPEED_BEGIN|广东移动",
+    '[{"region":"广东移动","family":"IPv4","rtt":"18ms","single_down_f":80,"single_up_f":0}]',
+    "@@SPEED_END|0",
+    "@@RETRY|广东移动|1|1",
+    "@@SPEED_BEGIN|上海电信",
+    '[{"region":"上海电信","family":"IPv4","rtt":"30ms","single_down_f":80,"single_up_f":40}]',
+    "@@SPEED_END|0",
+    "@@RETRY|上海电信|1|0",
+    "@@END"
+  ].join("\n");
+  const r = parser.parseOutput(out, 0);
+  assert.deepStrictEqual(r.retries.map((x) => [x.point, x.retries, x.stillFailed]), [["广东移动", 1, true], ["上海电信", 1, false]]);
+  assert.strictEqual(r.speed[0].retries, 1);
+  assert.match(fmt.retryNote(r), /廣東移動 ×1（仍有失敗）/);
+});
