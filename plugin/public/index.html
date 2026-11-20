@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>中國網路測速</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb; --good: #16a34a; --mid: #ca8a04; --bad: #dc2626; --chip: #f1f5f9; --head: #1e3a8a; --on-head: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --card: #171a21; --text: #e5e7eb; --muted: #9ca3af; --line: #2a2f3a; --accent: #60a5fa; --chip: #222733; --head: #1e293b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  header { background: var(--head); color: var(--on-head); padding: 20px 16px; }
+  header .inner, main { max-width: 1100px; margin: 0 auto; }
+  header h1 { margin: 0; font-size: 22px; }
+  header .sub { opacity: .8; margin-top: 4px; font-size: 13px; }
+  header a { color: var(--on-head); }
+  main { padding: 16px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .toolbar input { flex: 1; min-width: 160px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; }
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seg button { border: 1px solid var(--line); background: var(--chip); color: var(--text); padding: 6px 12px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 16px; }
+  .card h2 { font-size: 17px; margin: 0; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.on { background: var(--good); }
+  .meta { color: var(--muted); font-size: 12px; margin: 4px 0 10px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 6px 10px; min-width: 120px; }
+  .stat b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  details { margin-top: 6px; }
+  summary { cursor: pointer; color: var(--accent); padding: 4px 0; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  .tablewrap { overflow-x: auto; margin: 8px 0; }
+  .good { color: var(--good); } .mid { color: var(--mid); } .bad { color: var(--bad); }
+  .small { font-size: 12px; color: var(--muted); }
+  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+  .imgwrap img { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; display: block; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 10px 16px 30px; }
+</style>
+</head>
+<body>
+<header><div class="inner">
+  <h1 id="title">中國網路測速</h1>
+  <div class="sub" id="sub">各節點到中國電信 / 聯通 / 移動的延遲、丟包、速度與回程重傳</div>
+</div></header>
+<main>
+  <div class="toolbar">
+    <input type="text" id="q" placeholder="搜尋節點名稱">
+    <div class="seg" id="fam"><button data-v="4" class="on">IPv4</button><button data-v="6">IPv6</button></div>
+  </div>
+  <div id="list"><div class="empty">載入中…</div></div>
+</main>
+<footer>延遲 / 丟包：TCP 握手探測（TcpQuality 節點）｜測速：泰爾測速｜↓ 去程＝中國→節點，↑ 回程＝節點→中國</footer>
+<script>
+(function () {
+  var BASE = "/api/plugin/cn-speedtest/public";
+  var ISP = { "电信": "電信", "联通": "聯通", "移动": "移動" };
+  var data = null, fam = "4";
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+  function ms(v) { return v == null ? "-" : (v < 10 ? v.toFixed(1) : Math.round(v)); }
+  function mbps(v) { return v == null || v < 0.001 ? '<span class="bad">失敗</span>' : (v >= 100 ? v.toFixed(0) : v.toFixed(1)); }
+  function pct(v) { return v == null ? "-" : (v < 10 ? v.toFixed(2) : v.toFixed(1)) + "%"; }
+  function latClass(v) { return v == null ? "bad" : v < 80 ? "good" : v < 180 ? "mid" : "bad"; }
+  function pctClass(v) { return v == null ? "" : v < 1 ? "good" : v < 5 ? "mid" : "bad"; }
+  function lossClass(v) { return v == null ? "" : v <= 0 ? "good" : v < 5 ? "mid" : "bad"; }
+  function ispCol(s) { return /电信|電信/.test(s) ? 0 : /联通|聯通/.test(s) ? 1 : /移动|移動/.test(s) ? 2 : 3; }
+  function ago(iso) {
+    if (!iso) return "-";
+    var s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+    if (s < 3600) return Math.round(s / 60) + " 分鐘前";
+    if (s < 86400) return Math.round(s / 3600) + " 小時前";
+    return Math.round(s / 86400) + " 天前";
+  }
+  function avg(a) { return a.length ? a.reduce(function (x, y) { return x + y; }, 0) / a.length : null; }
+
+  function stats(n) {
+    var out = [];
+    var lat = n.ping ? n.ping.latency.filter(function (r) { return r.family === fam; }) : [];
+    if (lat.length) {
+      var ok = lat.filter(function (r) { return r.recv > 0; });
+      var sent = 0, lost = 0;
+      lat.forEach(function (r) { sent += r.sent; lost += r.sent - r.recv; });
+      var bestOf = function (i) { var a = ok.filter(function (r) { return ispCol(r.isp) === i; }).map(function (r) { return r.avg; }); return a.length ? avg(a) : null; };
+      ["電信", "聯通", "移動"].forEach(function (name, i) {
+        var v = bestOf(i);
+        out.push('<div class="stat"><b class="' + latClass(v) + '">' + (v == null ? "-" : ms(v) + " ms") + "</b><span>" + name + " 平均延遲</span></div>");
+      });
+      var loss = sent ? lost / sent * 100 : null;
+      out.push('<div class="stat"><b class="' + lossClass(loss) + '">' + (loss == null ? "-" : loss.toFixed(1) + "%") + "</b><span>整體丟包</span></div>");
+    }
+    var sp = n.speed ? n.speed.speed.filter(function (r) { return r.family === fam; }) : [];
+    if (sp.length) {
+      var up = sp.map(function (r) { return r.singleUp > 0.001 ? r.singleUp : r.multiUp; }).filter(function (v) { return v > 0.001; });
+      var rt = sp.map(function (r) { return r.upRetrans; }).filter(function (v) { return v != null; });
+      var u = avg(up), r = avg(rt);
+      out.push('<div class="stat"><b>' + (u == null ? "-" : (u >= 100 ? u.toFixed(0) : u.toFixed(1)) + " Mbps") + "</b><span>回程↑ 平均速度</span></div>");
+      out.push('<div class="stat"><b class="' + pctClass(r) + '">' + pct(r) + "</b><span>回程重傳 平均</span></div>");
+    }
+    return out.length ? '<div class="stats">' + out.join("") + "</div>" : "";
+  }
+
+  function latencyTable(n) {
+    var rows = n.ping ? n.ping.latency.filter(function (r) { return r.family === fam; }) : [];
+    if (!rows.length) return "";
+    var provs = [], map = {};
+    rows.forEach(function (r) {
+      var c = ispCol(r.isp); if (c > 2) return;
+      if (!map[r.prov]) { map[r.prov] = [null, null, null]; provs.push(r.prov); }
+      map[r.prov][c] = r;
+    });
+    var cell = function (r) {
+      if (!r) return "<td>-</td><td></td>";
+      if (!r.recv) return '<td class="bad">不通</td><td class="bad">100%</td>';
+      return '<td class="' + latClass(r.avg) + '" title="最小 ' + ms(r.min) + " / 最大 " + ms(r.max) + " / 抖動 " + ms(r.jitter) + '">' + ms(r.avg) + '</td><td class="' + lossClass(r.loss) + '">' + (r.loss < 10 ? r.loss.toFixed(1) : Math.round(r.loss)) + "%</td>";
+    };
+    var h = '<div class="tablewrap"><table><thead><tr><th>省份</th><th>電信 ms</th><th>丟包</th><th>聯通 ms</th><th>丟包</th><th>移動 ms</th><th>丟包</th></tr></thead><tbody>';
+    provs.forEach(function (p) { h += "<tr><td>" + esc(p) + "</td>" + cell(map[p][0]) + cell(map[p][1]) + cell(map[p][2]) + "</tr>"; });
+    return h + "</tbody></table></div>";
+  }
+
+  function speedTable(n) {
+    var rows = n.speed ? n.speed.speed.filter(function (r) { return r.family === fam; }) : [];
+    if (!rows.length) return "";
+    var mode = n.speed.mode, single = mode !== "multi", multi = mode !== "single";
+    var h = '<div class="tablewrap"><table><thead><tr><th>測速點</th><th>延遲</th>' + (single ? "<th>單線程↓</th><th>單線程↑</th>" : "") + (multi ? "<th>多線程↓</th><th>多線程↑</th>" : "") + "<th>回程重傳</th></tr></thead><tbody>";
+    rows.forEach(function (r) {
+      h += "<tr><td>" + esc(r.prov + (ISP[r.isp] || r.isp)) + '</td><td class="' + latClass(r.rtt) + '">' + ms(r.rtt) + "</td>" +
+        (single ? "<td>" + mbps(r.singleDown) + "</td><td>" + mbps(r.singleUp) + "</td>" : "") +
+        (multi ? "<td>" + mbps(r.multiDown) + "</td><td>" + mbps(r.multiUp) + "</td>" : "") +
+        '<td class="' + pctClass(r.upRetrans) + '">' + pct(r.upRetrans) + (r.rtxSource === "snmp" ? "≈" : "") + "</td></tr>";
+    });
+    return h + "</tbody></table></div>";
+  }
+
+  function render() {
+    var box = $("list");
+    if (!data) return;
+    var q = $("q").value.trim().toLowerCase();
+    var nodes = data.nodes.filter(function (n) { return (n.ping || n.speed) && (!q || n.name.toLowerCase().indexOf(q) >= 0); });
+    if (!nodes.length) { box.innerHTML = '<div class="empty">' + (q ? "沒有符合的節點" : "目前還沒有測試結果") + "</div>"; return; }
+    box.innerHTML = nodes.map(function (n) {
+      var times = [];
+      if (n.ping) times.push("延遲 " + ago(n.ping.at));
+      if (n.speed) times.push("測速 " + ago(n.speed.at) + "（" + esc(n.speed.points || "北上廣") + "）");
+      var body = stats(n) + latencyTable(n) + speedTable(n);
+      if (!body) body = '<div class="small">此節點沒有 IPv' + fam + " 結果</div>";
+      return '<div class="card"><h2><span class="dot' + (n.online ? " on" : "") + '"></span>' + esc(n.name) + (n.region ? ' <span class="small">' + esc(n.region) + "</span>" : "") + "</h2>" +
+        '<div class="meta">' + times.join("｜") + (n.speed && n.speed.exit ? "｜" + esc(n.speed.exit) : "") + "</div>" + body +
+        (n.image ? '<details><summary>結果圖</summary><div class="imgwrap"><a href="' + BASE + "/image?uuid=" + encodeURIComponent(n.uuid) + '" target="_blank" rel="noopener"><img loading="lazy" alt="結果圖" src="' + BASE + "/image?uuid=" + encodeURIComponent(n.uuid) + '"></a></div></details>' : "") +
+        "</div>";
+    }).join("");
+  }
+
+  function load() {
+    fetch(BASE + "/data", { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      return r.json().then(function (j) { if (j.status !== "success") throw new Error(j.message || ("HTTP " + r.status)); return j.data; });
+    }).then(function (d) {
+      data = d;
+      $("title").textContent = d.title;
+      document.title = d.title + (d.site ? " - " + d.site : "");
+      $("sub").innerHTML = (d.site ? '<a href="/">' + esc(d.site) + "</a>　" : "") + "各節點到中國電信 / 聯通 / 移動的延遲、丟包、速度與回程重傳";
+      render();
+    }).catch(function (e) { $("list").innerHTML = '<div class="empty">' + esc(e.message) + "</div>"; });
+  }
+
+  $("fam").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    fam = b.getAttribute("data-v");
+    Array.prototype.forEach.call($("fam").querySelectorAll("button"), function (x) { x.classList.toggle("on", x === b); });
+    render();
+  });
+  $("q").addEventListener("input", render);
+  load();
+  setInterval(load, 60000);
+})();
+</script>
+</body>
+</html>

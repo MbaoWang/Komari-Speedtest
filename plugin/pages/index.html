@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>中國網路測速</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb; --accent-weak: #dbeafe; --good: #16a34a; --mid: #ca8a04; --bad: #dc2626; --chip: #f1f5f9; --on-accent: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --card: #171a21; --text: #e5e7eb; --muted: #9ca3af; --line: #2a2f3a; --accent: #60a5fa; --accent-weak: #1e3a5f; --chip: #222733; --on-accent: #0b1220; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+  .nodes { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .node { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .node:last-child { border-bottom: 0; }
+  .node.off { opacity: .55; }
+  .node .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.on { background: var(--good); }
+  .small { font-size: 12px; color: var(--muted); }
+  label.row { display: block; margin: 10px 0 4px; font-weight: 600; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { border: 1px solid var(--line); background: var(--chip); color: var(--text); padding: 5px 12px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .seg button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  input[type=text] { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--card); color: var(--text); font: inherit; }
+  .btn { border: 0; background: var(--accent); color: var(--on-accent); padding: 9px 16px; border-radius: 8px; cursor: pointer; font: inherit; font-weight: 600; }
+  .btn.ghost { background: var(--chip); color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  .tablewrap { overflow-x: auto; margin-bottom: 12px; }
+  .good { color: var(--good); } .mid { color: var(--mid); } .bad { color: var(--bad); }
+  .job { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .job:last-child { border-bottom: 0; }
+  .job .what { flex: 1; min-width: 0; }
+  .badge { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--chip); white-space: nowrap; }
+  .badge.running { background: var(--accent-weak); color: var(--accent); }
+  .badge.done { color: var(--good); } .badge.failed { color: var(--bad); }
+  .msg { padding: 8px 10px; border-radius: 8px; background: var(--chip); margin-top: 10px; display: none; }
+  .msg.err { color: var(--bad); }
+  .kv { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--muted); margin-bottom: 10px; }
+  .empty { color: var(--muted); padding: 20px 0; text-align: center; }
+  pre.cmd { max-height: 300px; overflow: auto; background: var(--chip); padding: 10px; border-radius: 8px; font-size: 12px; }
+  .imgbox { margin: 4px 0 14px; }
+  .imgbox img { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; display: block; margin-bottom: 4px; }
+  .imgbox a { color: var(--accent); }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <h1>🇨🇳 中國網路測速</h1>
+  <div class="sub">三網 TCP 延遲與丟包（TcpQuality 節點）＋ 泰爾測速與 TCP 重傳率（taierspeedtest-mod），IPv4 / IPv6。測試在所選節點上透過 Komari Agent 執行。</div>
+
+  <div class="sub" id="publink"></div>
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>1. 選擇節點</h2>
+        <div class="actions" style="margin:0 0 8px">
+          <button class="btn ghost" id="selOnline">全選在線</button>
+          <button class="btn ghost" id="selNone">清除</button>
+        </div>
+        <div class="nodes" id="nodes"><div class="empty">載入中…</div></div>
+      </div>
+      <div class="card">
+        <h2>2. 測試設定</h2>
+        <label class="row">項目</label>
+        <div class="seg" id="type">
+          <button data-v="ping" class="on">三網延遲</button>
+          <button data-v="speed">泰爾測速</button>
+          <button data-v="full">完整（兩者）</button>
+        </div>
+        <label class="row">IP 協議</label>
+        <div class="seg" id="family">
+          <button data-v="4">IPv4</button>
+          <button data-v="6">IPv6</button>
+          <button data-v="both" class="on">雙棧</button>
+        </div>
+        <div id="speedOpts">
+          <label class="row">測速點 <span class="small">（留空 = 北上廣三網，可加運營商，如 上海电信）</span></label>
+          <input type="text" id="points" placeholder="例如：上海,广东,湖北电信">
+          <div class="seg" id="quickPoints" style="margin-top:6px"></div>
+          <label class="row">測速模式</label>
+          <div class="seg" id="mode">
+            <button data-v="single" class="on">單線程</button>
+            <button data-v="multi">多線程</button>
+            <button data-v="both">單 + 多</button>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="run">開始測試</button>
+          <button class="btn ghost" id="preview">預覽節點指令</button>
+          <button class="btn ghost" id="tgtest">測試 Telegram</button>
+        </div>
+        <div class="msg" id="msg"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>任務</h2>
+        <div id="jobs"><div class="empty">載入中…</div></div>
+      </div>
+      <div class="card" id="resultCard" style="display:none">
+        <h2 id="resultTitle">結果</h2>
+        <div id="result"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  var BASE = "/api/plugin/cn-speedtest";
+  var state = { nodes: [], selected: {}, jobs: [], provinces: [], viewing: null, viewingNode: null };
+  var ISP = { "电信": "電信", "联通": "聯通", "移动": "移動" };
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+
+  function api(method, path, body) {
+    var opt = { method: method, credentials: "same-origin", cache: "no-store", headers: {} };
+    if (body) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+    return fetch(BASE + path, opt).then(function (r) {
+      return r.json().catch(function () { throw new Error("HTTP " + r.status); }).then(function (j) {
+        if (j.status !== "success") throw new Error(j.message || ("HTTP " + r.status));
+        return j.data;
+      });
+    });
+  }
+
+  function showMsg(text, isErr) {
+    var m = $("msg");
+    m.style.display = text ? "block" : "none";
+    m.className = "msg" + (isErr ? " err" : "");
+    m.textContent = text || "";
+  }
+
+  function segValue(id) { var b = $(id).querySelector("button.on"); return b ? b.getAttribute("data-v") : ""; }
+  function bindSeg(id, cb) {
+    $(id).addEventListener("click", function (e) {
+      var b = e.target.closest("button"); if (!b) return;
+      Array.prototype.forEach.call($(id).querySelectorAll("button"), function (x) { x.classList.toggle("on", x === b); });
+      if (cb) cb(b.getAttribute("data-v"));
+    });
+  }
+  function setSeg(id, v) {
+    Array.prototype.forEach.call($(id).querySelectorAll("button"), function (x) { x.classList.toggle("on", x.getAttribute("data-v") === v); });
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return "-";
+    var d = new Date(iso);
+    return d.toLocaleString();
+  }
+  function ms(v) { return v == null ? "-" : (v < 10 ? v.toFixed(1) : Math.round(v)); }
+  function mbps(v) { return v == null || v < 0.001 ? '<span class="bad">失敗</span>' : (v >= 100 ? v.toFixed(0) : v.toFixed(1)); }
+  function pct(v) { return v == null ? "-" : (v < 10 ? v.toFixed(2) : v.toFixed(1)) + "%"; }
+  function pctClass(v) { return v == null ? "" : v < 1 ? "good" : v < 5 ? "mid" : "bad"; }
+  function latClass(v) { return v == null ? "bad" : v < 80 ? "good" : v < 180 ? "mid" : "bad"; }
+  function typeLabel(t) { return t === "ping" ? "三網延遲" : t === "speed" ? "泰爾測速" : "完整測試"; }
+  function famLabel(f) { return f === "4" ? "IPv4" : f === "6" ? "IPv6" : "雙棧"; }
+  function modeLabel(m) { return m === "multi" ? "多線程" : m === "both" ? "單+多" : "單線程"; }
+  function ispCol(s) { return /电信|電信/.test(s) ? 0 : /联通|聯通/.test(s) ? 1 : /移动|移動/.test(s) ? 2 : 3; }
+
+  function renderNodes() {
+    var box = $("nodes");
+    if (!state.nodes.length) { box.innerHTML = '<div class="empty">沒有節點</div>'; return; }
+    box.innerHTML = state.nodes.map(function (n) {
+      var win = /windows/i.test(n.os);
+      var dis = !n.online || win;
+      return '<label class="node' + (dis ? " off" : "") + '" title="' + esc(n.uuid) + '">' +
+        '<input type="checkbox" data-u="' + esc(n.uuid) + '"' + (state.selected[n.uuid] ? " checked" : "") + (dis ? " disabled" : "") + '>' +
+        '<span class="dot' + (n.online ? " on" : "") + '"></span>' +
+        '<span class="name">' + esc(n.name) + (n.region ? ' <span class="small">' + esc(n.region) + '</span>' : "") + (win ? ' <span class="small">(Windows 不支援)</span>' : "") + '</span>' +
+        '<a class="small" href="#" data-last="' + esc(n.uuid) + '">' + (n.lastPing || n.lastSpeed ? "上次結果" : "") + '</a>' +
+        '</label>';
+    }).join("");
+  }
+
+  function renderJobs() {
+    var box = $("jobs");
+    if (!state.jobs.length) { box.innerHTML = '<div class="empty">尚無任務，從左側選擇節點開始測試</div>'; return; }
+    box.innerHTML = state.jobs.map(function (j) {
+      var names = j.clients.map(function (u) { return j.names[u] || u.slice(0, 8); }).join("、");
+      var st = j.status === "running" ? "執行中 " + j.done + "/" + j.clients.length : j.status === "done" ? "完成" : j.status === "cancelled" ? "已取消" : "失敗";
+      var secs = Math.round(((j.finishedAt ? Date.parse(j.finishedAt) : Date.now()) - Date.parse(j.startedAt)) / 1000);
+      return '<div class="job" data-job="' + esc(j.id) + '">' +
+        '<span class="badge ' + esc(j.status) + '">' + st + '</span>' +
+        '<div class="what"><div>' + typeLabel(j.type) + "・" + famLabel(j.family) + (j.type !== "ping" ? "・" + esc(j.points || "北上廣") + "・" + modeLabel(j.mode) : "") + '</div>' +
+        '<div class="small">' + esc(names) + "｜" + fmtTime(j.startedAt) + "｜" + secs + " 秒" + (j.status === "running" ? "（預估 " + j.estimateSec + " 秒）" : "") + (j.origin === "tg" ? "｜Telegram" : j.origin === "cron" ? "｜定時" : "") + '</div></div>' +
+        (j.status === "running" ? '<button class="btn ghost" data-cancel="' + esc(j.id) + '">取消</button>' : "") +
+        '</div>';
+    }).join("");
+  }
+
+  function latencyHTML(lat) {
+    var html = "";
+    ["4", "6"].forEach(function (fam) {
+      var rows = lat.filter(function (r) { return r.family === fam; });
+      if (!rows.length) return;
+      var provs = [], map = {}, others = [];
+      rows.forEach(function (r) {
+        var c = ispCol(r.isp);
+        if (c > 2) { others.push(r); return; }
+        if (!map[r.prov]) { map[r.prov] = [null, null, null]; provs.push(r.prov); }
+        map[r.prov][c] = r;
+      });
+      var cell = function (r) {
+        if (!r) return "<td>-</td>";
+        if (!r.recv) return '<td class="bad">×</td>';
+        return '<td class="' + latClass(r.avg) + '" title="' + esc(r.host) + "\n最小 " + ms(r.min) + " / 最大 " + ms(r.max) + " / 抖動 " + ms(r.jitter) + "\n發送 " + r.sent + "，成功 " + r.recv + "，握手重傳 " + (r.synRetrans || 0) + "，失敗 " + (r.fail != null ? r.fail : r.sent - r.recv) + '">' + ms(r.avg) + (r.loss > 0 ? ' <span class="' + (r.loss >= 10 ? "bad" : "mid") + ' small">' + (r.loss < 10 ? r.loss.toFixed(1) : Math.round(r.loss)) + "%</span>" : "") + "</td>";
+      };
+      html += '<div class="tablewrap"><table><thead><tr><th>IPv' + fam + ' 延遲 (ms) / 丟包</th><th>電信</th><th>聯通</th><th>移動</th></tr></thead><tbody>';
+      provs.forEach(function (p) { html += "<tr><td>" + esc(p) + "</td>" + cell(map[p][0]) + cell(map[p][1]) + cell(map[p][2]) + "</tr>"; });
+      others.forEach(function (r) { html += "<tr><td>" + esc(r.prov + " " + (ISP[r.isp] || r.isp)) + "</td>" + cell(r) + "<td></td><td></td></tr>"; });
+      html += "</tbody></table></div>";
+    });
+    return html;
+  }
+
+  function speedHTML(sp, mode) {
+    var html = "";
+    var single = mode !== "multi", multi = mode !== "single";
+    ["4", "6"].forEach(function (fam) {
+      var rows = sp.filter(function (r) { return r.family === fam; });
+      if (!rows.length) return;
+      html += '<div class="tablewrap"><table><thead><tr><th>IPv' + fam + ' 泰爾測速 (Mbps)</th><th>延遲</th>' +
+        (single ? "<th>單線程↓</th><th>單線程↑</th>" : "") + (multi ? "<th>多線程↓</th><th>多線程↑</th>" : "") + '<th title="測速期間節點送往中國（回程）的資料被 TCP 重傳的比例，與 TcpQuality 的回程重傳相同">回程重傳</th></tr></thead><tbody>';
+      rows.forEach(function (r) {
+        html += "<tr><td>" + esc(r.prov + (ISP[r.isp] || r.isp)) + '</td><td class="' + latClass(r.rtt) + '">' + ms(r.rtt) + "</td>" +
+          (single ? "<td>" + mbps(r.singleDown) + "</td><td>" + mbps(r.singleUp) + "</td>" : "") +
+          (multi ? "<td>" + mbps(r.multiDown) + "</td><td>" + mbps(r.multiUp) + "</td>" : "") +
+          '<td class="' + pctClass(r.upRetrans) + '" title="' + (r.rtxSource === "snmp" ? "系統整體計數器估算" : r.upSegs != null ? "重傳 " + r.retransSegs + " / 送出 " + r.upSegs + " 段" : "") + '">' + pct(r.upRetrans) + (r.rtxSource === "snmp" ? "≈" : "") + "</td></tr>";
+      });
+      html += "</tbody></table></div>";
+    });
+    if (html) html += '<div class="small" style="margin:-4px 0 12px">↓ 去程（中國→節點）　↑ 回程（節點→中國）</div>';
+    return html;
+  }
+
+  function imageHTML(img) {
+    if (!img || !img.file) return "";
+    var src = BASE + "/image?file=" + encodeURIComponent(img.file);
+    return '<div class="imgbox"><a href="' + src + '" target="_blank" rel="noopener"><img src="' + src + '" alt="結果圖" loading="lazy"></a>' +
+      '<div class="small"><a href="' + src + '" download="' + esc(img.file) + '">下載結果圖</a>' +
+      (img.url ? '　公開網址：<a href="' + esc(img.url) + '" target="_blank" rel="noopener">' + esc(img.url) + '</a>' : "") + "</div></div>";
+  }
+
+  function maskIp(ip) {
+    if (!ip) return "";
+    if (ip.indexOf(":") >= 0) return ip.split(":").slice(0, 2).join(":") + ":****";
+    var q = ip.split("."); return q.length === 4 ? q[0] + "." + q[1] + ".*.*" : ip;
+  }
+
+  function resultHTML(r, mode) {
+    if (!r) return '<div class="empty">尚未回傳</div>';
+    var h = '<div class="kv">';
+    if (r.ip4) h += "<span>IPv4 出口：" + esc(maskIp(r.ip4)) + "</span>";
+    if (r.ip6) h += "<span>IPv6 出口：" + esc(maskIp(r.ip6)) + "</span>";
+    if (r.exit) h += "<span>泰爾識別：" + esc(r.exit) + "</span>";
+    h += "</div>";
+    if (r.latency && r.latency.length) h += latencyHTML(r.latency);
+    if (r.speed && r.speed.length) h += speedHTML(r.speed, mode);
+    (r.errors || []).forEach(function (e) { h += '<div class="bad">❌ ' + esc(e) + "</div>"; });
+    (r.warnings || []).slice(0, 5).forEach(function (e) { h += '<div class="small">⚠️ ' + esc(e) + "</div>"; });
+    return h;
+  }
+
+  function showJob(id) {
+    state.viewing = id; state.viewingNode = null;
+    api("GET", "/job?id=" + encodeURIComponent(id)).then(function (j) {
+      $("resultCard").style.display = "block";
+      $("resultTitle").textContent = typeLabel(j.type) + "・" + famLabel(j.family) + (j.type !== "ping" ? "・" + (j.points || "北上廣") + "・" + modeLabel(j.mode) : "");
+      var h = "";
+      j.clients.forEach(function (u) {
+        h += "<h3>" + esc(j.names[u] || u) + "</h3>" + imageHTML(j.results[u] && j.results[u].image) + resultHTML(j.results[u], j.mode);
+      });
+      if (j.error) h += '<div class="bad">' + esc(j.error) + "</div>";
+      if (j.status === "running") h += '<div class="small">⏳ 執行中，完成後自動更新…</div>';
+      $("result").innerHTML = h;
+    }).catch(function (e) { showMsg(e.message, true); });
+  }
+
+  function showLatest(uuid) {
+    state.viewing = null; state.viewingNode = uuid;
+    api("GET", "/latest?uuid=" + encodeURIComponent(uuid)).then(function (d) {
+      $("resultCard").style.display = "block";
+      $("resultTitle").textContent = (d.name || uuid) + " 的最近結果";
+      var l = d.latest || {};
+      var h = imageHTML(l.image);
+      if (l.ping) h += '<div class="small">延遲：' + fmtTime(l.ping.at) + "</div>" + resultHTML({ latency: l.ping.latency, ip4: l.ping.ip4, ip6: l.ping.ip6 });
+      if (l.speed) h += '<div class="small">測速：' + fmtTime(l.speed.at) + "（" + esc(l.speed.points || "北上廣") + "）</div>" + resultHTML({ speed: l.speed.speed, exit: l.speed.exit }, l.speed.mode);
+      $("result").innerHTML = h || '<div class="empty">尚無紀錄</div>';
+    }).catch(function (e) { showMsg(e.message, true); });
+  }
+
+  var firstLoad = true;
+  function refresh() {
+    return api("GET", "/overview").then(function (d) {
+      state.nodes = d.nodes; state.jobs = d.jobs; state.provinces = d.provinces;
+      if (firstLoad) {
+        firstLoad = false;
+        setSeg("family", d.defaults.family); setSeg("mode", d.defaults.mode);
+        $("points").value = d.defaults.points || "";
+        $("quickPoints").innerHTML = ['北上廣'].concat(["北京", "上海", "广东", "江苏", "浙江", "湖北", "四川", "福建"]).map(function (p) { return '<button data-p="' + esc(p) + '">' + esc(p) + "</button>"; }).join("");
+        var tg = d.telegram;
+        if (!tg.configured) $("tgtest").title = "尚未設定 Bot Token";
+        var pub = d.publicPage;
+        $("publink").innerHTML = pub.enabled ? '訪客公開頁：<a href="' + esc(pub.url) + '" target="_blank" rel="noopener">' + esc(location.origin + pub.url) + "</a>" : "訪客公開頁未開啟（插件設定 →「開放訪客查看結果」）";
+      }
+      renderNodes(); renderJobs();
+      var anyRunning = d.jobs.some(function (j) { return j.status === "running"; });
+      if (state.viewing) {
+        var v = d.jobs.filter(function (j) { return j.id === state.viewing; })[0];
+        if (v && (v.status === "running" || v._refresh)) showJob(state.viewing);
+        else if (v && state.lastViewDone !== v.id + v.status) { state.lastViewDone = v.id + v.status; showJob(state.viewing); }
+      }
+      clearTimeout(state.timer);
+      state.timer = setTimeout(refresh, anyRunning ? 5000 : 20000);
+    }).catch(function (e) { showMsg("載入失敗：" + e.message, true); clearTimeout(state.timer); state.timer = setTimeout(refresh, 15000); });
+  }
+
+  bindSeg("type", function (v) { $("speedOpts").style.display = v === "ping" ? "none" : "block"; });
+  bindSeg("family"); bindSeg("mode");
+  $("speedOpts").style.display = "none";
+
+  $("quickPoints").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    var p = b.getAttribute("data-p");
+    if (p === "北上廣") { $("points").value = ""; return; }
+    var cur = $("points").value.split(/[,，]/).map(function (x) { return x.trim(); }).filter(Boolean);
+    var i = cur.indexOf(p); if (i >= 0) cur.splice(i, 1); else cur.push(p);
+    $("points").value = cur.join(",");
+  });
+
+  $("nodes").addEventListener("change", function (e) {
+    var u = e.target.getAttribute("data-u"); if (!u) return;
+    if (e.target.checked) state.selected[u] = true; else delete state.selected[u];
+  });
+  $("nodes").addEventListener("click", function (e) {
+    var a = e.target.closest("a[data-last]"); if (!a) return;
+    e.preventDefault(); showLatest(a.getAttribute("data-last"));
+  });
+  $("selOnline").onclick = function () { state.nodes.forEach(function (n) { if (n.online && !/windows/i.test(n.os)) state.selected[n.uuid] = true; }); renderNodes(); };
+  $("selNone").onclick = function () { state.selected = {}; renderNodes(); };
+
+  $("jobs").addEventListener("click", function (e) {
+    var c = e.target.closest("[data-cancel]");
+    if (c) { e.stopPropagation(); api("POST", "/cancel", { id: c.getAttribute("data-cancel") }).then(refresh); return; }
+    var j = e.target.closest("[data-job]"); if (j) showJob(j.getAttribute("data-job"));
+  });
+
+  function spec() {
+    return { clients: Object.keys(state.selected), type: segValue("type"), family: segValue("family"), points: $("points").value.trim(), mode: segValue("mode") };
+  }
+
+  $("run").onclick = function () {
+    var s = spec();
+    if (!s.clients.length) return showMsg("請先勾選至少一個在線節點", true);
+    $("run").disabled = true; showMsg("派發中…");
+    api("POST", "/run", s).then(function (j) {
+      var skip = [];
+      if (j.skipped.offline.length) skip.push("離線 " + j.skipped.offline.length);
+      if (j.skipped.busy.length) skip.push("測試中 " + j.skipped.busy.length);
+      showMsg("已派發到 " + j.clients.length + " 個節點，預估 " + Math.ceil(j.estimateSec / 60) + " 分鐘" + (skip.length ? "（略過：" + skip.join("、") + "）" : ""));
+      state.viewing = j.id; showJob(j.id); refresh();
+    }).catch(function (e) { showMsg(e.message, true); }).then(function () { $("run").disabled = false; });
+  };
+
+  $("preview").onclick = function () {
+    api("POST", "/preview", spec()).then(function (d) {
+      $("resultCard").style.display = "block";
+      $("resultTitle").textContent = "節點將執行的指令（sh）";
+      $("result").innerHTML = '<pre class="cmd">' + esc(d.command) + "</pre>";
+      state.viewing = null;
+    }).catch(function (e) { showMsg(e.message, true); });
+  };
+
+  $("tgtest").onclick = function () {
+    api("POST", "/telegram/test").then(function (d) { showMsg("已傳送測試訊息到 " + d.chat + "（@" + d.bot + "）"); }).catch(function (e) { showMsg(e.message, true); });
+  };
+
+  refresh();
+})();
+</script>
+</body>
+</html>
