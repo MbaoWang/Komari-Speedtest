@@ -29,6 +29,9 @@ var KW = {
   id: ["id", "chatid", "我的id"]
 };
 var FAMILY_KW = { "v4": "4", "ipv4": "4", "4": "4", "v6": "6", "ipv6": "6", "6": "6", "雙棧": "both", "双栈": "both", "both": "both", "dual": "both", "v46": "both", "46": "both" };
+// 運營商關鍵字（單獨一個字詞；「上海电信」這種帶地點的仍視為測速點）
+var ISP_KW = { "電信": "电信", "电信": "电信", "聯通": "联通", "联通": "联通", "移動": "移动", "移动": "移动", "三網": "all", "三网": "all" };
+var ISP_CODE = { "ct": "电信", "cu": "联通", "cm": "移动" };
 var MODE_KW = {
   "single": "single", "單線程": "single", "单线程": "single", "單": "single", "单": "single", "s": "single",
   "multi": "multi", "多線程": "multi", "多线程": "multi", "多": "multi", "m": "multi",
@@ -110,7 +113,8 @@ function createBot(getConfig, mgr) {
   function session(chatId) {
     var c = cfg();
     var s = sessions[chatId];
-    if (!s) { s = sessions[chatId] = { points: c.defaultPoints, mode: c.defaultMode }; }
+    if (!s) { s = sessions[chatId] = { points: c.defaultPoints, mode: c.defaultMode, isps: c.defaultIsps }; }
+    if (!Array.isArray(s.isps)) s.isps = c.defaultIsps;
     return s;
   }
 
@@ -191,18 +195,35 @@ function createBot(getConfig, mgr) {
     }
     var text = "<b>" + title + "</b>\n" + info + "\n\n" +
       "📍 測速點：<b>" + fmt.esc(fmt.pointsLabel(s.points)) + "</b>\n" +
-      "⚙️ 測速模式：<b>" + fmt.modeLabel(s.mode) + "</b>\n\n" +
+      "⚙️ 測速模式：<b>" + fmt.modeLabel(s.mode) + "</b>\n" +
+      "📡 運營商：<b>" + fmt.ispsLabel(s.isps) + "</b>\n\n" +
       "選擇測試項目 👇";
     var t = target;
     var rows = [
       [{ text: "📶 延遲 IPv4", callback_data: "r:p4:" + t }, { text: "📶 延遲 IPv6", callback_data: "r:p6:" + t }, { text: "📶 延遲 雙棧", callback_data: "r:pb:" + t }],
       [{ text: "🚀 測速 IPv4", callback_data: "r:s4:" + t }, { text: "🚀 測速 IPv6", callback_data: "r:s6:" + t }, { text: "🚀 測速 雙棧", callback_data: "r:sb:" + t }],
       [{ text: "🧪 完整 IPv4", callback_data: "r:f4:" + t }, { text: "🧪 完整 IPv6", callback_data: "r:f6:" + t }, { text: "🧪 完整 雙棧", callback_data: "r:fb:" + t }],
-      [{ text: "📍 選擇測速點", callback_data: "pt:" + t }, { text: "⚙️ 模式：" + fmt.modeLabel(s.mode), callback_data: "mc:" + t }]
+      [{ text: "📍 選擇測速點", callback_data: "pt:" + t }, { text: "⚙️ 模式：" + fmt.modeLabel(s.mode), callback_data: "mc:" + t }],
+      [{ text: "📡 運營商：" + fmt.ispsLabel(s.isps), callback_data: "ic:" + t }]
     ];
     if (target !== "all") rows.push([{ text: "📄 上次結果", callback_data: "l:" + t }, { text: "⬅️ 返回節點列表", callback_data: "h:0" }]);
     else rows.push([{ text: "⬅️ 返回節點列表", callback_data: "h:0" }]);
     return { text: text, markup: { inline_keyboard: rows } };
+  }
+
+  function ispView(chatId, target) {
+    var s = session(chatId);
+    var all = !s.isps.length;
+    var names = [["电信", "電信"], ["联通", "聯通"], ["移动", "移動"]];
+    var rows = [
+      [{ text: (all ? "✅ " : "") + "三網（全部）", callback_data: "it:a:" + target }],
+      names.map(function (n, i) { return { text: (!all && s.isps.indexOf(n[0]) >= 0 ? "✅ " : "") + n[1], callback_data: "it:" + i + ":" + target }; }),
+      [{ text: "✔️ 完成", callback_data: "n:" + target }]
+    ];
+    return {
+      text: "<b>📡 選擇運營商</b>（可多選）\n目前：<b>" + fmt.ispsLabel(s.isps) + "</b>\n\n同時套用到延遲 / 丟包與泰爾測速。\n<i>文字指令也可以加：測速 節點名 電信 聯通</i>",
+      markup: { inline_keyboard: rows }
+    };
   }
 
   function pointsView(chatId, target) {
@@ -242,7 +263,7 @@ function createBot(getConfig, mgr) {
       "<b>互動選單</b>：/menu → 選節點 → 選測試項目",
       "",
       "<b>指令 / 關鍵字</b>（可不加斜線）：",
-      "<code>/ping 節點 [v4|v6|雙棧]</code>  三網 TCP 延遲",
+      "<code>/ping 節點 [v4|v6|雙棧] [電信|聯通|移動]</code>  延遲 / 丟包",
       "<code>/speed 節點 [v4|v6|雙棧] [測速點] [單|多|單多]</code>  泰爾測速",
       "<code>/full 節點 [v4|v6|雙棧] [測速點]</code>  延遲 + 測速",
       "<code>/last 節點</code>  上次結果",
@@ -255,16 +276,19 @@ function createBot(getConfig, mgr) {
       "<code>延遲 2 雙棧</code>",
       "<code>测速 日本 v4 上海,广东 多</code>",
       "<code>speed tokyo 上海电信,北京联通</code>",
+      "<code>延遲 HK-1 電信 移動</code>（只測電信、移動）",
       "<code>全測 all</code>（所有在線節點）",
       "",
       "節點可用：編號、名稱（不分大小寫，可部分符合）、UUID 前綴、all / 全部。",
-      "測速點：省份或城市（如 上海、广东、深圳），可加運營商（上海电信）。預設北上廣三網。"
+      "測速點：省份或城市（如 上海、广东、深圳），可加運營商（上海电信）。預設北上廣三網。",
+      "運營商：電信 / 聯通 / 移動（可多個，同時套用到延遲與測速），也可在選單「📡 運營商」選擇。",
+      "測速某點失敗（速度 0）時會自動重測（設定可調次數）。"
     ].join("\n");
   }
 
   // ---------------- 執行測試 ----------------
 
-  async function startJob(chatId, replyTo, type, family, target, points, mode) {
+  async function startJob(chatId, replyTo, type, family, target, points, mode, isps) {
     var uuids;
     var list = await mgr.nodes(true);
     if (target === "all") {
@@ -273,18 +297,18 @@ function createBot(getConfig, mgr) {
     if (!uuids.length) throw new Error("沒有在線節點");
     var names = uuids.map(function (u) { return mgr.nodeName(u); });
     var statusMsg = await send(chatId,
-      "⏳ <b>" + fmt.typeLabel(type) + "</b>（" + fmt.familyLabel(remote.normFamily(family)) + "）已派發到：" + fmt.esc(names.slice(0, 10).join("、")) + (names.length > 10 ? " 等 " + names.length + " 台" : "") +
+      "⏳ <b>" + fmt.typeLabel(type) + "</b>（" + fmt.familyLabel(remote.normFamily(family)) + "｜" + fmt.ispsLabel(remote.normIsps(isps)) + "）已派發到：" + fmt.esc(names.slice(0, 10).join("、")) + (names.length > 10 ? " 等 " + names.length + " 台" : "") +
       (type !== "ping" ? "\n📍 " + fmt.esc(fmt.pointsLabel(remote.normPoints(points))) + "｜" + fmt.modeLabel(remote.normMode(mode)) : "") +
       "\n請稍候…", replyTo ? { reply_to_message_id: replyTo, allow_sending_without_reply: true } : undefined);
     try {
-      var job = await mgr.run({ clients: uuids, type: type, family: family, points: points, mode: mode, origin: { kind: "tg", chatId: chatId, messageId: statusMsg.message_id } });
+      var job = await mgr.run({ clients: uuids, type: type, family: family, points: points, mode: mode, isps: isps, origin: { kind: "tg", chatId: chatId, messageId: statusMsg.message_id } });
       var extra = "";
       var sk = job.skipped;
       if (sk.offline.length) extra += "\n⚪ 略過離線：" + sk.offline.map(mgr.nodeName).map(fmt.esc).join("、");
       if (sk.windows.length) extra += "\n🪟 略過 Windows：" + sk.windows.map(mgr.nodeName).map(fmt.esc).join("、");
       if (sk.busy.length) extra += "\n⏳ 略過測試中：" + sk.busy.map(mgr.nodeName).map(fmt.esc).join("、");
       await edit(chatId, statusMsg.message_id,
-        "⏳ <b>" + fmt.typeLabel(job.type) + "</b>（" + fmt.familyLabel(job.family) + "）執行中：" + fmt.esc(job.clients.map(function (u) { return job.names[u]; }).join("、")) +
+        "⏳ <b>" + fmt.typeLabel(job.type) + "</b>（" + fmt.familyLabel(job.family) + "｜" + fmt.ispsLabel(job.isps) + "）執行中：" + fmt.esc(job.clients.map(function (u) { return job.names[u]; }).join("、")) +
         (job.type !== "ping" ? "\n📍 " + fmt.esc(fmt.pointsLabel(job.points)) + "｜" + fmt.modeLabel(job.mode) : "") +
         "\n預估約 " + Math.ceil(job.estimateSec / 60) + " 分鐘，完成後會自動回傳結果。" + extra);
     } catch (e) {
@@ -386,17 +410,18 @@ function createBot(getConfig, mgr) {
     var first = tokens.shift().replace(/@\S+$/, "");
     var cmd = lookupCmd(first);
     if (!cmd) return slash ? { cmd: "unknown" } : null;
-    var family = null, mode = null, pointsArr = [], nodeTokens = [];
+    var family = null, mode = null, pointsArr = [], nodeTokens = [], ispArr = [];
     tokens.forEach(function (tok) {
       var low = tok.toLowerCase();
       if (nodeTokens.length && FAMILY_KW[low] && family === null) { family = FAMILY_KW[low]; return; }
       if (!nodeTokens.length && FAMILY_KW[low] && !/^\d+$/.test(low)) { family = FAMILY_KW[low]; return; }
+      if (ISP_KW[low] || (nodeTokens.length && ISP_CODE[low])) { ispArr.push(ISP_KW[low] || ISP_CODE[low]); return; }
       if (MODE_KW[low] && mode === null && (nodeTokens.length || low.length > 1)) { mode = MODE_KW[low]; return; }
       var pts = tok.split(/[,，、]/).filter(Boolean);
       if (pts.length && pts.every(isPointToken)) { pointsArr = pointsArr.concat(pts); return; }
       nodeTokens.push(tok);
     });
-    return { cmd: cmd, family: family, mode: mode, points: pointsArr.length ? pointsArr.join(",") : null, nodeTokens: nodeTokens };
+    return { cmd: cmd, family: family, mode: mode, points: pointsArr.length ? pointsArr.join(",") : null, isps: ispArr.length ? remote.normIsps(ispArr) : null, nodeTokens: nodeTokens };
   }
 
   async function nodesListText() {
@@ -456,8 +481,9 @@ function createBot(getConfig, mgr) {
         var family = parsed.family || cfg().defaultFamily;
         var points = parsed.points !== null ? parsed.points : s.points;
         var mode = parsed.mode || s.mode;
+        var isps = parsed.isps !== null ? parsed.isps : s.isps;
         try { remote.normPoints(points); } catch (e) { return send(chatId, "⚠️ " + fmt.esc(errText(e))); }
-        return startJob(chatId, msg.message_id, parsed.cmd, family, r.target, points, mode);
+        return startJob(chatId, msg.message_id, parsed.cmd, family, r.target, points, mode, isps);
       }
     }
   }
@@ -494,6 +520,21 @@ function createBot(getConfig, mgr) {
           view = pointsView(chatId, target);
           break;
         }
+        case "ic": view = ispView(chatId, parts.slice(1).join(":")); break;
+        case "it": {
+          var tgt = parts.slice(2).join(":");
+          if (parts[1] === "a") s.isps = [];
+          else {
+            var isp = ["电信", "联通", "移动"][Number(parts[1])];
+            var cur = s.isps.length ? s.isps.slice() : [];
+            var at2 = cur.indexOf(isp);
+            if (at2 >= 0) cur.splice(at2, 1); else if (isp) cur.push(isp);
+            s.isps = remote.normIsps(cur);
+          }
+          saveState();
+          view = ispView(chatId, tgt);
+          break;
+        }
         case "mc": {
           s.mode = s.mode === "single" ? "multi" : s.mode === "multi" ? "both" : "single";
           saveState();
@@ -511,7 +552,7 @@ function createBot(getConfig, mgr) {
           var type = code.charAt(0) === "s" ? "speed" : code.charAt(0) === "f" ? "full" : "ping";
           var fam = code.charAt(1) === "b" ? "both" : code.charAt(1);
           await api("answerCallbackQuery", { callback_query_id: q.id, text: "已派發 " + fmt.typeLabel(type) });
-          await startJob(chatId, null, type, fam, parts.slice(2).join(":"), s.points, s.mode);
+          await startJob(chatId, null, type, fam, parts.slice(2).join(":"), s.points, s.mode, s.isps);
           return;
         }
       }

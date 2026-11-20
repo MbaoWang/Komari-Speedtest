@@ -64,6 +64,9 @@ function normalizeConfig(raw) {
     defaultFamily: remote.normFamily(c.default_family || "both"),
     defaultMode: remote.normMode(c.default_mode || "single"),
     defaultPoints: pts,
+    defaultIsps: remote.normIsps(c.default_isps),
+    speedRetries: remote.clampInt(c.speed_retries, 0, 3, 1),
+    historyKeep: remote.clampInt(c.history_keep, 10, 200, 40),
     duration: remote.clampInt(c.duration, 5, 13, 5),
     pingCount: remote.clampInt(c.ping_count, 3, 50, 20),
     pingParallel: remote.clampInt(c.ping_parallel, 1, 64, 16),
@@ -111,7 +114,7 @@ function jobSummary(j) {
   var ok = 0;
   j.clients.forEach(function (u) { if (j.results[u] && j.results[u].ok) ok++; });
   return {
-    id: j.id, type: j.type, family: j.family, points: j.points, mode: j.mode, status: j.status,
+    id: j.id, type: j.type, family: j.family, points: j.points, mode: j.mode, isps: j.isps || [], status: j.status,
     clients: j.clients, names: j.names, done: Object.keys(j.results || {}).length, ok: ok,
     startedAt: j.startedAt, finishedAt: j.finishedAt, estimateSec: j.estimateSec, error: j.error,
     origin: j.origin ? j.origin.kind : "web", skipped: j.skipped
@@ -209,9 +212,10 @@ function registerRoutes() {
         return { uuid: n.uuid, name: n.name, region: n.region, os: n.os, arch: n.arch, online: n.online, hidden: n.hidden, group: n.group,
           lastPing: l.ping ? l.ping.at : null, lastSpeed: l.speed ? l.speed.at : null };
       }),
-      jobs: mgr.jobs().slice(0, 30).map(jobSummary),
+      jobs: mgr.jobs().map(jobSummary),
+      historyKeep: c.historyKeep,
       provinces: remote.PROVINCES,
-      defaults: { family: c.defaultFamily, mode: c.defaultMode, points: c.defaultPoints, duration: c.duration },
+      defaults: { family: c.defaultFamily, mode: c.defaultMode, points: c.defaultPoints, isps: c.defaultIsps, duration: c.duration, retries: c.speedRetries },
       publicPage: { enabled: c.publicEnabled, url: "/api/plugin/" + SHORT + "/public/" },
       telegram: { enabled: c.tgEnabled, configured: Boolean(c.tgToken), running: Boolean(bot && bot.isRunning()), allowed: c.tgAllowedIds.length }
     };
@@ -220,8 +224,12 @@ function registerRoutes() {
   adminRoute("POST", "/run", async function (req) {
     var b = parseBody(req);
     if (!Array.isArray(b.clients) || !b.clients.length) throw new Error("請選擇至少一個節點");
-    var job = await mgr.run({ clients: b.clients, type: b.type, family: b.family, points: b.points, mode: b.mode, origin: { kind: "web" } });
+    var job = await mgr.run({ clients: b.clients, type: b.type, family: b.family, points: b.points, mode: b.mode, isps: b.isps, origin: { kind: "web" } });
     return jobSummary(job);
+  });
+
+  adminRoute("POST", "/jobs/clear", async function () {
+    return { removed: mgr.clearFinished() };
   });
 
   adminRoute("POST", "/cancel", async function (req) {
@@ -269,14 +277,15 @@ function registerRoutes() {
         runId: "preview-0000", ping: type !== "speed", speed: type !== "ping",
         family: b.family || c.defaultFamily, points: b.points !== undefined ? b.points : c.defaultPoints, mode: b.mode || c.defaultMode,
         duration: c.duration, pingCount: c.pingCount, parallel: c.pingParallel, provinceFilter: c.provinceFilter,
-        getNodesUrl: c.getNodesUrl, taierUrl: c.taierUrl, customTargets: c.customTargets
+        getNodesUrl: c.getNodesUrl, taierUrl: c.taierUrl, customTargets: c.customTargets,
+        isps: b.isps !== undefined ? b.isps : c.defaultIsps, retries: c.speedRetries
       })
     };
   });
 
   server.registerRPC("cnSpeedtest:run", async function (params) {
     var p = params || {};
-    return jobSummary(await mgr.run({ clients: p.clients, type: p.type, family: p.family, points: p.points, mode: p.mode, origin: { kind: "web" } }));
+    return jobSummary(await mgr.run({ clients: p.clients, type: p.type, family: p.family, points: p.points, mode: p.mode, isps: p.isps, origin: { kind: "web" } }));
   });
   server.registerRPC("cnSpeedtest:latest", function (params) {
     var uuid = params && params.uuid ? String(params.uuid) : "";
@@ -295,7 +304,7 @@ function setupCron() {
         var pool = c.cronNodes.length ? c.cronNodes : list.map(function (n) { return n.uuid; });
         var online = list.filter(function (n) { return n.online && pool.indexOf(n.uuid) >= 0 && !/windows/i.test(n.os); }).map(function (n) { return n.uuid; });
         if (!online.length) return;
-        await mgr.run({ clients: online, type: c.cronType, family: c.defaultFamily, points: c.defaultPoints, mode: c.defaultMode, origin: { kind: "cron" } });
+        await mgr.run({ clients: online, type: c.cronType, family: c.defaultFamily, points: c.defaultPoints, mode: c.defaultMode, isps: c.defaultIsps, origin: { kind: "cron" } });
       } catch (e) { console.warn("[cn-speedtest] 定時測試失敗：" + errText(e)); }
     });
     console.info("[cn-speedtest] 已啟用定時測試：" + c.cronSpec + "（" + c.cronType + "）");

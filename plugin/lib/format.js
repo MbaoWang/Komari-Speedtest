@@ -50,6 +50,20 @@ function familyLabel(f) {
 function modeLabel(m) {
   return m === "multi" ? "多線程" : m === "both" ? "單線程 + 多線程" : "單線程";
 }
+function ispsLabel(isps) {
+  if (!isps || !isps.length || isps.length >= 3) return "三網";
+  return isps.map(tIsp).join("、");
+}
+
+// 自動重測說明
+function retryNote(r) {
+  if (!r || !r.retries || !r.retries.length) return "";
+  return "已自動重測：" + r.retries.map(function (x) {
+    var m = String(x.point).match(/^(.*?)(电信|联通|移动)?$/);
+    return tProv(m[1]) + tIsp(m[2] || "") + " ×" + x.retries + (x.stillFailed ? "（仍有失敗）" : "");
+  }).join("、");
+}
+
 function pointsLabel(p) {
   return p ? p : "北上廣三網";
 }
@@ -152,7 +166,7 @@ function nodeResultHTML(job, nodeName, r, opts) {
   opts = opts || {};
   var parts = [];
   parts.push("<b>🇨🇳 " + esc(typeLabel(job.type)) + "｜" + esc(nodeName) + "</b>");
-  var meta = "協議：" + familyLabel(job.family);
+  var meta = "協議：" + familyLabel(job.family) + "｜運營商：" + ispsLabel(job.isps);
   if (job.type !== "ping") meta += "｜測速點：" + esc(pointsLabel(job.points)) + "｜" + modeLabel(job.mode);
   parts.push(meta);
   if (r) {
@@ -182,6 +196,7 @@ function nodeResultHTML(job, nodeName, r, opts) {
       if (rt.approx) parts.push("<i>※ 節點沒有 ss，重傳率為系統整體計數器估算</i>");
     }
   }
+  if (retryNote(r)) parts.push("↻ " + esc(retryNote(r)));
   if (r.errors.length) parts.push("\n❌ " + r.errors.map(esc).join("\n❌ "));
   if (r.warnings.length && opts.showWarnings !== false) parts.push("⚠️ " + r.warnings.slice(0, 4).map(esc).join("\n⚠️ "));
   var took = job.finishedAt && job.startedAt ? Math.round((Date.parse(job.finishedAt) - Date.parse(job.startedAt)) / 1000) : null;
@@ -192,7 +207,7 @@ function nodeResultHTML(job, nodeName, r, opts) {
 // 圖片說明用的簡短摘要（Telegram caption 上限 1024 字）
 function shortSummaryHTML(job, nodeName, r) {
   var parts = ["<b>🇨🇳 " + esc(typeLabel(job.type)) + "｜" + esc(nodeName) + "</b>"];
-  var meta = familyLabel(job.family);
+  var meta = familyLabel(job.family) + "｜" + ispsLabel(job.isps);
   if (job.type !== "ping") meta += "｜" + esc(pointsLabel(job.points)) + "｜" + modeLabel(job.mode);
   parts.push(meta);
   if (!r) { parts.push("⚠️ 沒有收到節點回傳結果"); return parts.join("\n"); }
@@ -210,6 +225,7 @@ function shortSummaryHTML(job, nodeName, r) {
     if (rt.length) line += "，回程重傳 平均 " + fmtPct(avg(rt)) + "（最高 " + fmtPct(Math.max.apply(null, rt)) + "）";
     parts.push(esc(line));
   });
+  if (retryNote(r)) parts.push("↻ " + esc(retryNote(r)).slice(0, 200));
   if (r.errors && r.errors.length) parts.push("❌ " + esc(r.errors.join("；")).slice(0, 300));
   return parts.join("\n");
 }
@@ -238,6 +254,6 @@ function splitMessage(html, limit) {
 
 module.exports = {
   esc: esc, tIsp: tIsp, tProv: tProv, fmtMs: fmtMs, fmtMbps: fmtMbps, fmtTime: fmtTime,
-  typeLabel: typeLabel, familyLabel: familyLabel, modeLabel: modeLabel, pointsLabel: pointsLabel,
+  typeLabel: typeLabel, ispsLabel: ispsLabel, retryNote: retryNote, familyLabel: familyLabel, modeLabel: modeLabel, pointsLabel: pointsLabel,
   latencyTables: latencyTables, speedTable: speedTable, retransTable: retransTable, fmtPct: fmtPct, shortSummaryHTML: shortSummaryHTML, nodeResultHTML: nodeResultHTML, splitMessage: splitMessage
 };

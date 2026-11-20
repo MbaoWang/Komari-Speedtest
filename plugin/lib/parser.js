@@ -98,7 +98,7 @@ function applyRetrans(rows, block) {
 // 回傳：{ ok, os, arch, ip4, ip6, exit, latency:[], speed:[], errors:[], warnings:[] }
 function parseOutput(raw, exitCode) {
   var text = stripAnsi(raw);
-  var res = { ok: false, os: "", arch: "", ip4: "", ip6: "", exit: "", latency: [], speed: [], errors: [], warnings: [], speedRc: null };
+  var res = { ok: false, os: "", arch: "", ip4: "", ip6: "", exit: "", latency: [], speed: [], errors: [], warnings: [], speedRc: null, retries: [] };
   var lines = text.split("\n");
   var cur = null;
   var blocks = [];
@@ -137,6 +137,13 @@ function parseOutput(raw, exitCode) {
       case "@@RTX":
         if (last) last.rtx[p[1] === "6" ? "6" : "4"] = { dso: num(p[2]) || 0, rt: num(p[3]) || 0, dsi: num(p[4]) || 0, oo: num(p[5]) || 0, conns: num(p[6]) || 0 };
         break;
+      case "@@RETRY": {
+        var tries = num(p[2]) || 0;
+        var left = num(p[3]);
+        if (last) last.retries = tries;
+        res.retries.push({ point: p[1] || "", retries: tries, stillFailed: left !== null && left > 0 });
+        break;
+      }
       case "@@RTXS": {
         var o0 = num(p[1]), r0 = num(p[2]), o1 = num(p[3]), r1 = num(p[4]);
         if (last && o0 !== null && o1 !== null && r0 !== null && r1 !== null && o1 > o0) last.snmp = { o: o1 - o0, r: Math.max(0, r1 - r0) };
@@ -171,7 +178,7 @@ function parseOutput(raw, exitCode) {
     var arr = extractJsonArray(b.lines.join("\n"));
     if (arr && arr.length) {
       anyRows = true;
-      res.speed = res.speed.concat(applyRetrans(parseSpeedRows(arr), b));
+      res.speed = res.speed.concat(applyRetrans(parseSpeedRows(arr), b).map(function (r) { r.retries = b.retries || 0; return r; }));
     } else {
       res.warnings.push("泰爾測速 " + (b.point || "") + " 沒有結果（exit " + b.rc + "）" + (b.err.length ? "：" + b.err.join(" / ") : ""));
     }

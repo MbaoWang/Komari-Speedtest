@@ -192,13 +192,15 @@ function renderResult(job, nodeName, r, opts) {
   fams.forEach(function (f) { h += 44 + ROW + speed.filter(function (s) { return s.family === f; }).length * ROW + 16; });
   if (fams.length) h += 28;
   var msgs = (r ? r.errors.map(function (e) { return "錯誤：" + e; }) : ["沒有收到節點結果"]);
+  var notes = r && fmt.retryNote(r) ? ["※ " + fmt.retryNote(r)] : [];
+  h += notes.length * 28;
   h += msgs.length * 28 + 56;
 
   var cv = new Canvas(W, h, C.bg);
   // 標題列
   cv.rect(0, 0, W, 96, C.head);
   cv.text(PAD, 16, cv.fit(fmt.typeLabel(job.type) + "｜" + nodeName, W - 2 * PAD), C.headText, C.head, { bold: true });
-  var meta = fmt.familyLabel(job.family) + (job.type !== "ping" ? "　測速點 " + fmt.pointsLabel(job.points) + "　" + fmt.modeLabel(job.mode) : "") + "　" + fmt.fmtTime(job.finishedAt || new Date().toISOString());
+  var meta = fmt.familyLabel(job.family) + "　" + fmt.ispsLabel(job.isps) + (job.type !== "ping" ? "　測速點 " + fmt.pointsLabel(job.points) + "　" + fmt.modeLabel(job.mode) : "") + "　" + fmt.fmtTime(job.finishedAt || new Date().toISOString());
   cv.text(PAD, 54, meta, C.headSub, C.head, { maxW: W - 2 * PAD });
   var y = 96 + 12;
   var info = [];
@@ -277,6 +279,7 @@ function renderResult(job, nodeName, r, opts) {
     y += 28;
   }
 
+  notes.forEach(function (m) { cv.text(PAD, y + 4, m, C.mid, C.bg, { maxW: W - 2 * PAD }); y += 28; });
   msgs.forEach(function (m) { cv.text(PAD, y + 4, m, C.bad, C.bg, { maxW: W - 2 * PAD }); y += 28; });
   cv.rect(0, h - 40, W, 40, C.thBg);
   cv.text(PAD, h - 32, "Komari cn-speedtest　延遲 / 丟包：TCP 握手探測（TcpQuality 節點）　測速：泰爾測速", C.sub, C.thBg, { maxW: W - 2 * PAD });
