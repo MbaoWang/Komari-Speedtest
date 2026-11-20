@@ -1,0 +1,485 @@
+{
+  "name": {
+    "zh_TW": "中國網路測速（三網延遲 / 泰爾測速）",
+    "zh_CN": "中国网络测速（三网延迟 / 泰尔测速）",
+    "zh-CN": "中国网络测速（三网延迟 / 泰尔测速）",
+    "en": "China Network Speedtest"
+  },
+  "short": "cn-speedtest",
+  "description": {
+    "zh_TW": "透過 Komari Agent 在節點上檢測中國電信 / 聯通 / 移動的 IPv4、IPv6 TCP 延遲、丟包率（TcpQuality 節點）與泰爾測速（taierspeedtest-mod，含 TCP 重傳率），支援 Komari 後台直接測試與 Telegram 機器人互動式選單、文字指令。",
+    "zh_CN": "通过 Komari Agent 在节点上检测中国电信 / 联通 / 移动的 IPv4、IPv6 TCP 延迟、丢包率与泰尔测速，支持后台直接测试与 Telegram 机器人交互菜单、文字指令。",
+    "zh-CN": "通过 Komari Agent 在节点上检测中国电信 / 联通 / 移动的 IPv4、IPv6 TCP 延迟、丢包率与泰尔测速，支持后台直接测试与 Telegram 机器人交互菜单、文字指令。",
+    "en": "Test China Telecom/Unicom/Mobile IPv4/IPv6 latency and Taier speedtest from your nodes via the Komari agent, from the admin page or an interactive Telegram bot."
+  },
+  "author": "MbaoWang",
+  "version": "1.3.0",
+  "url": "https://github.com/MbaoWang/komari-speedtest",
+  "komari": ">=1.0.5",
+  "entry": "script.js",
+  "permissions": {
+    "node": true,
+    "allowRoutes": true,
+    "allowSystemRPC": true,
+    "timeout": 60,
+    "maxHTTPBodyBytes": 2097152
+  },
+  "configuration": {
+    "type": "managed",
+    "name": {
+      "zh_TW": "中國網路測速設定",
+      "zh_CN": "中国网络测速设置",
+      "zh-CN": "中国网络测速设置",
+      "en": "Settings"
+    },
+    "data": [
+      {
+        "type": "title",
+        "name": {
+          "zh_TW": "Telegram 機器人",
+          "zh_CN": "Telegram 机器人",
+          "zh-CN": "Telegram 机器人",
+          "en": "Telegram bot"
+        }
+      },
+      {
+        "key": "tg_enabled",
+        "type": "switch",
+        "default": false,
+        "name": {
+          "zh_TW": "啟用 Telegram 機器人",
+          "zh_CN": "启用 Telegram 机器人",
+          "zh-CN": "启用 Telegram 机器人",
+          "en": "Enable Telegram bot"
+        }
+      },
+      {
+        "key": "tg_token",
+        "type": "string",
+        "default": "",
+        "name": {
+          "zh_TW": "Bot Token",
+          "zh_CN": "Bot Token",
+          "zh-CN": "Bot Token",
+          "en": "Bot token"
+        },
+        "help": {
+          "zh_TW": "向 @BotFather 申請，格式如 123456:ABC-DEF…",
+          "zh_CN": "向 @BotFather 申请",
+          "zh-CN": "向 @BotFather 申请",
+          "en": "Get it from @BotFather"
+        }
+      },
+      {
+        "key": "tg_allowed_ids",
+        "type": "string",
+        "default": "",
+        "name": {
+          "zh_TW": "允許的 Telegram ID（逗號分隔）",
+          "zh_CN": "允许的 Telegram ID（逗号分隔）",
+          "zh-CN": "允许的 Telegram ID（逗号分隔）",
+          "en": "Allowed Telegram IDs (comma separated)"
+        },
+        "help": {
+          "zh_TW": "使用者 ID 或群組 chat id。留空則機器人不執行任何測試（對機器人傳 /id 可查詢）",
+          "zh_CN": "用户 ID 或群组 chat id，留空则不执行任何测试（发送 /id 查询）",
+          "zh-CN": "用户 ID 或群组 chat id，留空则不执行任何测试（发送 /id 查询）",
+          "en": "User or chat IDs. Empty = nobody may run tests (send /id to the bot)"
+        }
+      },
+      {
+        "key": "tg_notify_ids",
+        "type": "string",
+        "default": "",
+        "name": {
+          "zh_TW": "結果通知 ID（定時 / 後台觸發）",
+          "zh_CN": "结果通知 ID（定时 / 后台触发）",
+          "zh-CN": "结果通知 ID（定时 / 后台触发）",
+          "en": "Notify IDs (cron / web runs)"
+        },
+        "help": {
+          "zh_TW": "定時測試、或下方開啟後由後台觸發的測試，結果傳送到這些 chat id",
+          "zh_CN": "定时测试或后台触发的测试结果推送到这些 chat id",
+          "zh-CN": "定时测试或后台触发的测试结果推送到这些 chat id",
+          "en": "Where cron (and optionally web) results are sent"
+        }
+      },
+      {
+        "key": "tg_notify_web",
+        "type": "switch",
+        "default": false,
+        "name": {
+          "zh_TW": "後台觸發的測試也推送到 Telegram",
+          "zh_CN": "后台触发的测试也推送到 Telegram",
+          "zh-CN": "后台触发的测试也推送到 Telegram",
+          "en": "Also push web-triggered results"
+        }
+      },
+      {
+        "key": "tg_show_hidden",
+        "type": "switch",
+        "default": false,
+        "name": {
+          "zh_TW": "機器人顯示隱藏節點",
+          "zh_CN": "机器人显示隐藏节点",
+          "zh-CN": "机器人显示隐藏节点",
+          "en": "Show hidden nodes in bot"
+        }
+      },
+      {
+        "key": "tg_show_full_ip",
+        "type": "switch",
+        "default": false,
+        "name": {
+          "zh_TW": "顯示完整出口 IP（預設遮罩）",
+          "zh_CN": "显示完整出口 IP（默认遮罩）",
+          "zh-CN": "显示完整出口 IP（默认遮罩）",
+          "en": "Show full egress IP (masked by default)"
+        }
+      },
+      {
+        "key": "tg_result_format",
+        "type": "select",
+        "options": "image,text,both",
+        "default": "image",
+        "name": {
+          "zh_TW": "Telegram 結果格式（image=圖片 text=文字 both=兩者）",
+          "zh_CN": "Telegram 结果格式（image=图片 text=文字 both=两者）",
+          "zh-CN": "Telegram 结果格式（image=图片 text=文字 both=两者）",
+          "en": "Telegram result format"
+        },
+        "help": {
+          "zh_TW": "image：傳結果圖 + 簡短摘要；text：文字表格；both：兩者都傳",
+          "zh_CN": "image：结果图 + 简短摘要",
+          "zh-CN": "image：结果图 + 简短摘要",
+          "en": "image = PNG report with a short caption"
+        }
+      },
+      {
+        "key": "tg_api_base",
+        "type": "string",
+        "default": "https://api.telegram.org",
+        "name": {
+          "zh_TW": "Telegram API 位址",
+          "zh_CN": "Telegram API 地址",
+          "zh-CN": "Telegram API 地址",
+          "en": "Telegram API base"
+        },
+        "help": {
+          "zh_TW": "伺服器無法直連 Telegram 時可填反向代理位址",
+          "zh_CN": "服务器无法直连 Telegram 时可填反代地址",
+          "zh-CN": "服务器无法直连 Telegram 时可填反代地址",
+          "en": "Reverse proxy if api.telegram.org is blocked"
+        }
+      },
+      {
+        "type": "title",
+        "name": {
+          "zh_TW": "預設測試參數",
+          "zh_CN": "默认测试参数",
+          "zh-CN": "默认测试参数",
+          "en": "Default test parameters"
+        }
+      },
+      {
+        "key": "default_family",
+        "type": "select",
+        "options": "both,4,6",
+        "default": "both",
+        "name": {
+          "zh_TW": "預設 IP 協議（both=雙棧）",
+          "zh_CN": "默认 IP 协议（both=双栈）",
+          "zh-CN": "默认 IP 协议（both=双栈）",
+          "en": "Default IP family"
+        }
+      },
+      {
+        "key": "default_points",
+        "type": "string",
+        "default": "",
+        "name": {
+          "zh_TW": "預設測速點",
+          "zh_CN": "默认测速点",
+          "zh-CN": "默认测速点",
+          "en": "Default speedtest points"
+        },
+        "help": {
+          "zh_TW": "留空 = 北上廣三網。可填省份 / 城市，逗號分隔，可加運營商，例如：上海,广东,湖北电信",
+          "zh_CN": "留空 = 北上广三网。例如：上海,广东,湖北电信",
+          "zh-CN": "留空 = 北上广三网。例如：上海,广东,湖北电信",
+          "en": "Empty = Beijing/Shanghai/Guangdong x 3 ISPs"
+        }
+      },
+      {
+        "key": "default_mode",
+        "type": "select",
+        "options": "single,multi,both",
+        "default": "single",
+        "name": {
+          "zh_TW": "預設測速模式（single=單線程 multi=多線程 both=兩者）",
+          "zh_CN": "默认测速模式",
+          "zh-CN": "默认测速模式",
+          "en": "Default speedtest mode"
+        }
+      },
+      {
+        "key": "duration",
+        "type": "number",
+        "default": 5,
+        "name": {
+          "zh_TW": "每方向測速秒數（5~13）",
+          "zh_CN": "每方向测速秒数（5~13）",
+          "zh-CN": "每方向测速秒数（5~13）",
+          "en": "Seconds per direction (5-13)"
+        }
+      },
+      {
+        "key": "ping_count",
+        "type": "number",
+        "default": 20,
+        "name": {
+          "zh_TW": "延遲：每個節點探測次數（3~50，越多丟包率越準）",
+          "zh_CN": "延迟：每个节点探测次数（3~50，越多丟包率越準）",
+          "zh-CN": "延迟：每个节点探测次数（3~50，越多丟包率越準）",
+          "en": "Latency probes per target (3-50)"
+        }
+      },
+      {
+        "key": "ping_parallel",
+        "type": "number",
+        "default": 16,
+        "name": {
+          "zh_TW": "延遲：同時探測節點數（1~64）",
+          "zh_CN": "延迟：并行探测节点数（1~64）",
+          "zh-CN": "延迟：并行探测节点数（1~64）",
+          "en": "Latency parallelism (1-64)"
+        }
+      },
+      {
+        "key": "province_filter",
+        "type": "string",
+        "default": "",
+        "name": {
+          "zh_TW": "延遲：只測這些省份（留空=全部）",
+          "zh_CN": "延迟：只测这些省份（留空=全部）",
+          "zh-CN": "延迟：只测这些省份（留空=全部）",
+          "en": "Latency: provinces filter"
+        },
+        "help": {
+          "zh_TW": "逗號分隔，例如：北京,上海,广东",
+          "zh_CN": "逗号分隔",
+          "zh-CN": "逗号分隔",
+          "en": "Comma separated"
+        }
+      },
+      {
+        "key": "max_jobs",
+        "type": "number",
+        "default": 3,
+        "name": {
+          "zh_TW": "同時進行的任務上限",
+          "zh_CN": "同时进行的任务上限",
+          "zh-CN": "同时进行的任务上限",
+          "en": "Max concurrent jobs"
+        }
+      },
+      {
+        "type": "title",
+        "name": {
+          "zh_TW": "訪客公開結果頁",
+          "zh_CN": "访客公开结果页",
+          "zh-CN": "访客公开结果页",
+          "en": "Public results page"
+        }
+      },
+      {
+        "key": "public_enabled",
+        "type": "switch",
+        "default": false,
+        "name": {
+          "zh_TW": "開放訪客查看結果",
+          "zh_CN": "开放访客查看结果",
+          "zh-CN": "开放访客查看结果",
+          "en": "Let visitors view results"
+        },
+        "help": {
+          "zh_TW": "網址：/api/plugin/cn-speedtest/public/。只顯示未隱藏節點的最近結果，不含 IP 與錯誤細節；Komari 設為私有站點時需登入才能看",
+          "zh_CN": "网址：/api/plugin/cn-speedtest/public/",
+          "zh-CN": "网址：/api/plugin/cn-speedtest/public/",
+          "en": "URL: /api/plugin/cn-speedtest/public/"
+        }
+      },
+      {
+        "key": "public_title",
+        "type": "string",
+        "default": "",
+        "name": {
+          "zh_TW": "公開頁標題（留空=中國網路測速）",
+          "zh_CN": "公开页标题",
+          "zh-CN": "公开页标题",
+          "en": "Public page title"
+        }
+      },
+      {
+        "type": "title",
+        "name": {
+          "zh_TW": "定時測試",
+          "zh_CN": "定时测试",
+          "zh-CN": "定时测试",
+          "en": "Scheduled tests"
+        }
+      },
+      {
+        "key": "cron_spec",
+        "type": "string",
+        "default": "",
+        "name": {
+          "zh_TW": "Cron 表達式（留空=停用）",
+          "zh_CN": "Cron 表达式（留空=停用）",
+          "zh-CN": "Cron 表达式（留空=停用）",
+          "en": "Cron (empty = disabled)"
+        },
+        "help": {
+          "zh_TW": "例如 0 8 * * * 每天 8 點；結果推送到「結果通知 ID」",
+          "zh_CN": "例如 0 8 * * *",
+          "zh-CN": "例如 0 8 * * *",
+          "en": "e.g. 0 8 * * *"
+        }
+      },
+      {
+        "key": "cron_type",
+        "type": "select",
+        "options": "ping,speed,full",
+        "default": "ping",
+        "name": {
+          "zh_TW": "定時測試類型（ping=延遲 speed=測速 full=兩者）",
+          "zh_CN": "定时测试类型",
+          "zh-CN": "定时测试类型",
+          "en": "Scheduled test type"
+        }
+      },
+      {
+        "key": "cron_nodes",
+        "type": "nodes",
+        "default": "[]",
+        "name": {
+          "zh_TW": "定時測試節點（留空=全部在線）",
+          "zh_CN": "定时测试节点（留空=全部在线）",
+          "zh-CN": "定时测试节点（留空=全部在线）",
+          "en": "Scheduled nodes (empty = all online)"
+        }
+      },
+      {
+        "type": "title",
+        "name": {
+          "zh_TW": "進階",
+          "zh_CN": "高级",
+          "zh-CN": "高级",
+          "en": "Advanced"
+        }
+      },
+      {
+        "key": "image_enabled",
+        "type": "switch",
+        "default": true,
+        "name": {
+          "zh_TW": "產生結果圖（PNG，類似 TcpQuality 報告圖）",
+          "zh_CN": "生成结果图（PNG）",
+          "zh-CN": "生成结果图（PNG）",
+          "en": "Generate PNG report image"
+        }
+      },
+      {
+        "key": "image_upload",
+        "type": "select",
+        "options": "none,catbox,0x0",
+        "default": "none",
+        "name": {
+          "zh_TW": "自動上傳結果圖到圖床（none=不上傳）",
+          "zh_CN": "自动上传结果图到图床（none=不上传）",
+          "zh-CN": "自动上传结果图到图床（none=不上传）",
+          "en": "Upload image to a public host"
+        },
+        "help": {
+          "zh_TW": "catbox = catbox.moe，0x0 = 0x0.st；上傳後任何人有網址都能看到（出口 IP 預設已遮罩）。失敗時會自動改試另一個",
+          "zh_CN": "上传后任何人有链接都能看到（出口 IP 默认遮罩）",
+          "zh-CN": "上传后任何人有链接都能看到（出口 IP 默认遮罩）",
+          "en": "Anyone with the link can view it (IPs are masked by default)"
+        }
+      },
+      {
+        "key": "getnodes_url",
+        "type": "string",
+        "default": "",
+        "name": {
+          "zh_TW": "延遲節點清單（TcpQuality getNodes）",
+          "zh_CN": "延迟节点清单（TcpQuality getNodes）",
+          "zh-CN": "延迟节点清单（TcpQuality getNodes）",
+          "en": "Latency target list URL"
+        },
+        "help": {
+          "zh_TW": "留空 = https://tcpquality.ibsgss.uk/getNodes",
+          "zh_CN": "留空 = https://tcpquality.ibsgss.uk/getNodes",
+          "zh-CN": "留空 = https://tcpquality.ibsgss.uk/getNodes",
+          "en": "Default https://tcpquality.ibsgss.uk/getNodes"
+        }
+      },
+      {
+        "key": "taier_url",
+        "type": "string",
+        "default": "",
+        "name": {
+          "zh_TW": "泰爾測速程式下載網址",
+          "zh_CN": "泰尔测速程序下载地址",
+          "zh-CN": "泰尔测速程序下载地址",
+          "en": "taierspeedtest binary URL"
+        },
+        "help": {
+          "zh_TW": "留空 = GitHub Release 最新版；{arch} 會被替換為 amd64 / arm64。國內節點可改用鏡像，例如 https://ghfast.top/https://github.com/MbaoWang/taierspeedtest-mod/releases/latest/download/taierspeedtest-linux-{arch}",
+          "zh_CN": "留空 = GitHub Release；{arch} 替换为 amd64 / arm64，可用镜像",
+          "zh-CN": "留空 = GitHub Release；{arch} 替换为 amd64 / arm64，可用镜像",
+          "en": "{arch} is replaced with amd64/arm64"
+        }
+      },
+      {
+        "key": "custom_targets",
+        "type": "textbox",
+        "default": "",
+        "name": {
+          "zh_TW": "自訂延遲目標（每行一個）",
+          "zh_CN": "自定义延迟目标（每行一个）",
+          "zh-CN": "自定义延迟目标（每行一个）",
+          "en": "Custom latency targets"
+        },
+        "help": {
+          "zh_TW": "格式：協議,省份,運營商,名稱,IP,端口  例如：4,上海,电信,上海电信,1.2.3.4,80",
+          "zh_CN": "格式：协议,省份,运营商,名称,IP,端口",
+          "zh-CN": "格式：协议,省份,运营商,名称,IP,端口",
+          "en": "family,province,isp,name,ip,port"
+        }
+      }
+    ]
+  },
+  "pages": [
+    {
+      "file": "pages/index.html",
+      "title": {
+        "zh_TW": "中國網路測速",
+        "zh_CN": "中国网络测速",
+        "zh-CN": "中国网络测速",
+        "en": "China Speedtest"
+      },
+      "visibility": "admin"
+    },
+    {
+      "file": "public/index.html",
+      "title": {
+        "zh_TW": "中國網路測速（公開）",
+        "zh_CN": "中国网络测速（公开）",
+        "zh-CN": "中国网络测速（公开）",
+        "en": "China Speedtest (public)"
+      },
+      "visibility": "public"
+    }
+  ]
+}
