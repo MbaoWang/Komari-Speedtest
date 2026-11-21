@@ -54,7 +54,7 @@ function createImaging(getConfig) {
     if (!cfg.imageEnabled) return null;
     var png;
     try {
-      png = render.renderResult(job, name, result, { showIp: cfg.imageShowFullIp });
+      png = render.renderResult(job, name, result, { showIp: cfg.imageShowFullIp, lang: job.lang });
     } catch (e) {
       console.warn("[cn-speedtest] 產生結果圖失敗：" + errText(e));
       return null;

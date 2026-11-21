@@ -13,7 +13,7 @@
     "en": "Test China Telecom/Unicom/Mobile IPv4/IPv6 latency and Taier speedtest from your nodes via the Komari agent, from the admin page or an interactive Telegram bot."
   },
   "author": "MbaoWang",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "url": "https://github.com/MbaoWang/komari-speedtest",
   "komari": ">=1.0.5",
   "entry": "script.js",
@@ -179,6 +179,24 @@
           "zh_CN": "默认测试参数",
           "zh-CN": "默认测试参数",
           "en": "Default test parameters"
+        }
+      },
+      {
+        "key": "language",
+        "type": "select",
+        "options": "auto,zh_TW,zh_CN",
+        "default": "auto",
+        "name": {
+          "zh_TW": "Telegram / 結果圖語言（auto=自動，zh_TW=繁體，zh_CN=簡體）",
+          "zh_CN": "Telegram / 结果图语言（auto=自动，zh_TW=繁体，zh_CN=简体）",
+          "zh-CN": "Telegram / 结果图语言（auto=自动，zh_TW=繁体，zh_CN=简体）",
+          "en": "Telegram / image language"
+        },
+        "help": {
+          "zh_TW": "auto：Telegram 跟各使用者 App 的語言、結果圖跟發起測試的人；後台與公開頁面一律跟 Komari 介面語言",
+          "zh_CN": "auto：Telegram 跟各用户 App 的语言，结果图跟发起测试的人；后台与公开页面跟 Komari 界面语言",
+          "zh-CN": "auto：Telegram 跟各用户 App 的语言，结果图跟发起测试的人；后台与公开页面跟 Komari 界面语言",
+          "en": "auto: follow each Telegram user's app language; web pages follow the Komari UI language"
         }
       },
       {

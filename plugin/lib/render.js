@@ -6,6 +6,7 @@
 var png = require("./png.js");
 var parser = require("./parser.js");
 var fmt = require("./format.js");
+var zh = require("./zh.js");
 
 var FONT = null;
 function font() {
@@ -76,9 +77,10 @@ Canvas.prototype.rect = function (x, y, w, h, c) {
   var x2 = Math.min(this.w, x + Math.round(w)), y2 = Math.min(this.h, y + Math.round(h));
   for (var yy = y; yy < y2; yy++) this.px.fill(ci, yy * this.w + x, yy * this.w + x2);
 };
+Canvas.prototype.conv = function (s) { s = String(s); return this.cn ? zh.toCN(s) : s; };
 Canvas.prototype.textWidth = function (s) {
   var f = font(), w = 0;
-  s = String(s);
+  s = this.conv(s);
   for (var i = 0; i < s.length; i++) {
     var gi = f.index[s.charAt(i)];
     var code = s.charCodeAt(i);
@@ -88,7 +90,7 @@ Canvas.prototype.textWidth = function (s) {
   return w;
 };
 Canvas.prototype.fit = function (s, maxW) {
-  s = String(s);
+  s = this.conv(s);
   if (this.textWidth(s) <= maxW) return s;
   while (s.length > 1 && this.textWidth(s + "…") > maxW) s = s.slice(0, -1);
   return s + "…";
@@ -97,7 +99,7 @@ Canvas.prototype.fit = function (s, maxW) {
 Canvas.prototype.text = function (x, y, s, fg, bg, opts) {
   opts = opts || {};
   var f = font();
-  s = String(s);
+  s = this.conv(s);
   if (opts.maxW) s = this.fit(s, opts.maxW);
   var w = this.textWidth(s);
   if (opts.align === "right") x -= w;
@@ -197,6 +199,7 @@ function renderResult(job, nodeName, r, opts) {
   h += msgs.length * 28 + 56;
 
   var cv = new Canvas(W, h, C.bg);
+  cv.cn = opts.lang === "zh_CN";
   // 標題列
   cv.rect(0, 0, W, 96, C.head);
   cv.text(PAD, 16, cv.fit(fmt.typeLabel(job.type) + "｜" + nodeName, W - 2 * PAD), C.headText, C.head, { bold: true });

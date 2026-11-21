@@ -7,6 +7,7 @@ var fs = require("fs");
 var path = require("path");
 var remote = require("./remote.js");
 var fmt = require("./format.js");
+var zh = require("./zh.js");
 
 var PAGE_SIZE = 10;
 
@@ -75,8 +76,32 @@ function createBot(getConfig, mgr) {
 
   function cfg() { return getConfig(); }
 
+  // ---- 語言：設定固定繁 / 簡，或 auto = 跟各使用者 Telegram App 的語言 ----
+  var curLang = "zh_TW";
+  function langFor(chatId) {
+    var c = cfg();
+    if (c.lang !== "auto") return c.lang;
+    var s = chatId !== undefined && chatId !== null ? sessions[chatId] : null;
+    return s && s.lang ? s.lang : "zh_TW";
+  }
+  function localize(params, lang) {
+    if (lang !== "zh_CN" || !params) return params;
+    var p = {};
+    for (var k in params) p[k] = params[k];
+    if (typeof p.text === "string") p.text = zh.toCN(p.text);
+    if (typeof p.caption === "string") p.caption = zh.toCN(p.caption);
+    if (p.reply_markup && p.reply_markup.inline_keyboard) {
+      p.reply_markup = { inline_keyboard: p.reply_markup.inline_keyboard.map(function (row) {
+        return row.map(function (b) { var nb = {}; for (var x in b) nb[x] = b[x]; nb.text = zh.toCN(b.text); return nb; });
+      }) };
+    }
+    if (Array.isArray(p.commands)) p.commands = p.commands.map(function (c) { return { command: c.command, description: zh.toCN(c.description) }; });
+    return p;
+  }
+
   async function api(method, params, signal) {
     var c = cfg();
+    if (params && method !== "getUpdates") params = localize(params, params.chat_id !== undefined ? langFor(params.chat_id) : curLang);
     var url = c.tgApiBase.replace(/\/+$/, "") + "/bot" + c.tgToken + "/" + method;
     var init = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params || {}) };
     if (signal) init.signal = signal;
@@ -323,7 +348,8 @@ function createBot(getConfig, mgr) {
     var list = await mgr.nodes(true);
     if (target === "all") {
       uuids = list.filter(function (n) { return n.online && !/windows/i.test(n.os) && (cfg().tgShowHidden || !n.hidden); }).map(function (n) { return n.uuid; });
-    } else uuids = [target];
+    } else if (Array.isArray(target)) uuids = target.slice();
+    else uuids = [target];
     if (!uuids.length) throw new Error("沒有在線節點");
     var names = uuids.map(function (u) { return mgr.nodeName(u); });
     var statusMsg = await send(chatId,
@@ -331,7 +357,7 @@ function createBot(getConfig, mgr) {
       (type !== "ping" ? "\n📍 " + fmt.esc(fmt.pointsLabel(remote.normPoints(points))) + "｜" + fmt.modeLabel(remote.normMode(mode)) : "") +
       "\n請稍候…", replyTo ? { reply_to_message_id: replyTo, allow_sending_without_reply: true } : undefined);
     try {
-      var job = await mgr.run({ clients: uuids, type: type, family: family, points: points, mode: mode, isps: isps, origin: { kind: "tg", chatId: chatId, messageId: statusMsg.message_id } });
+      var job = await mgr.run({ clients: uuids, type: type, family: family, points: points, mode: mode, isps: isps, lang: langFor(chatId), origin: { kind: "tg", chatId: chatId, messageId: statusMsg.message_id } });
       var extra = "";
       var sk = job.skipped;
       if (sk.offline.length) extra += "\n⚪ 略過離線：" + sk.offline.map(mgr.nodeName).map(fmt.esc).join("、");
@@ -350,10 +376,14 @@ function createBot(getConfig, mgr) {
     var f = job.family === "both" ? "b" : job.family;
     var t = job.type === "ping" ? "p" : job.type === "speed" ? "s" : "f";
     var target = job.clients.length > 1 ? "all" : uuid;
-    return { inline_keyboard: [[{ text: "🔁 再測一次", callback_data: "r:" + t + f + ":" + target }, { text: "📋 節點選單", callback_data: "n:" + uuid }]] };
+    // 「再測一次」照原任務的設定重跑（rr:任務ID）；原任務紀錄被刪掉時退回 r:（用聊天目前的設定）
+    return { inline_keyboard: [[{ text: "🔁 再測一次", callback_data: "rr:" + job.id + ":" + t + f + ":" + target }, { text: "📋 節點選單", callback_data: "n:" + uuid }]] };
   }
 
   async function sendPhoto(chatId, png, caption, extra) {
+    var loc = localize({ caption: caption, reply_markup: extra && extra.reply_markup }, langFor(chatId));
+    caption = loc.caption;
+    if (extra && extra.reply_markup) { var ex = {}; for (var kx in extra) ex[kx] = extra[kx]; ex.reply_markup = loc.reply_markup; extra = ex; }
     var form = new FormData();
     form.append("chat_id", String(chatId));
     form.append("caption", caption.length > 1024 ? caption.slice(0, 1000) + "…" : caption);
@@ -586,6 +616,18 @@ function createBot(getConfig, mgr) {
           await send(chatId, await lastResultText(parts.slice(1).join(":")));
           return;
         }
+        case "rr": {
+          var prev = mgr.getJob(parts[1]);
+          if (prev) {
+            await api("answerCallbackQuery", { callback_query_id: q.id, text: "照上次設定重測：" + fmt.typeLabel(prev.type) });
+            await startJob(chatId, null, prev.type, prev.family, prev.clients.length > 1 ? prev.clients : prev.clients[0], prev.points, prev.mode, prev.isps || []);
+            return;
+          }
+          // 找不到原任務（紀錄已刪除）：改用聊天目前的設定
+          parts = ["r"].concat(parts.slice(2));
+          toast = "找不到原任務紀錄，改用目前設定";
+        }
+        /* falls through */
         case "r": {
           var code = parts[1] || "p4";
           var type = code.charAt(0) === "s" ? "speed" : code.charAt(0) === "f" ? "full" : "ping";
@@ -604,6 +646,16 @@ function createBot(getConfig, mgr) {
   }
 
   async function handleUpdate(u) {
+    // 記下使用者 Telegram App 的語言（auto 模式用）
+    var from = u.message ? u.message.from : (u.callback_query ? u.callback_query.from : null);
+    var chatObj = u.message ? u.message.chat : (u.callback_query && u.callback_query.message ? u.callback_query.message.chat : null);
+    if (chatObj && from && from.language_code) {
+      var l = zh.normLang(from.language_code) || "zh_TW";
+      var ss = sessions[chatObj.id];
+      if (ss && ss.lang !== l) { ss.lang = l; saveState(); }
+      else if (!ss && isAllowed(from, chatObj)) { session(chatObj.id).lang = l; saveState(); }
+    }
+    curLang = chatObj ? langFor(chatObj.id) : langFor(null);
     try {
       if (u.message && typeof u.message.text === "string") await handleMessage(u.message);
       else if (u.callback_query) await handleCallback(u.callback_query);
@@ -655,6 +707,7 @@ function createBot(getConfig, mgr) {
     try {
       me = await api("getMe", {});
       console.info("[cn-speedtest] Telegram 機器人 @" + me.username + " 已啟動");
+      curLang = langFor(null);
       await api("setMyCommands", {
         commands: [
           { command: "menu", description: "互動式選單" },
