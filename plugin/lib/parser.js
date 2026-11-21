@@ -98,7 +98,7 @@ function applyRetrans(rows, block) {
 // 回傳：{ ok, os, arch, ip4, ip6, exit, latency:[], speed:[], errors:[], warnings:[] }
 function parseOutput(raw, exitCode) {
   var text = stripAnsi(raw);
-  var res = { ok: false, os: "", arch: "", ip4: "", ip6: "", exit: "", latency: [], speed: [], errors: [], warnings: [], speedRc: null, retries: [] };
+  var res = { ok: false, os: "", arch: "", ip4: "", ip6: "", exit: "", latency: [], speed: [], errors: [], warnings: [], speedRc: null, retries: [], traffic: { total: null, latency: null, speed: null, points: [] } };
   var lines = text.split("\n");
   var cur = null;
   var blocks = [];
@@ -142,6 +142,21 @@ function parseOutput(raw, exitCode) {
         var left = num(p[3]);
         if (last) last.retries = tries;
         res.retries.push({ point: p[1] || "", retries: tries, stillFailed: left !== null && left > 0, mode: p[4] || "" });
+        break;
+      }
+      case "@@TRAFFIC": {
+        // @@TRAFFIC|種類|rx0|tx0|rx1|tx1[|測速點|模式]
+        var rx = num(p[4]) - num(p[2]), tx = num(p[5]) - num(p[3]);
+        if (!isFinite(rx) || !isFinite(tx) || rx < 0 || tx < 0) break;
+        var tr = { rx: rx, tx: tx };
+        if (p[1] === "total") res.traffic.total = tr;
+        else if (p[1] === "latency") res.traffic.latency = tr;
+        else if (p[1] === "point") {
+          tr.point = p[6] || ""; tr.mode = p[7] || "";
+          res.traffic.points.push(tr);
+          var sp = res.traffic.speed || { rx: 0, tx: 0 };
+          sp.rx += rx; sp.tx += tx; res.traffic.speed = sp;
+        }
         break;
       }
       case "@@RTXS": {
@@ -202,6 +217,13 @@ function parseOutput(raw, exitCode) {
     });
   });
   order.forEach(function (k) { res.speed.push(merged[k]); });
+  // 每個測速點的流量（單 / 多線程與重測加總）
+  res.traffic.points.forEach(function (t) {
+    res.speed.forEach(function (r) {
+      if (r.region !== t.point) return;
+      r.trafficRx = (r.trafficRx || 0) + t.rx; r.trafficTx = (r.trafficTx || 0) + t.tx;
+    });
+  });
   if (blocks.length && !anyRows) res.errors.push("泰爾測速全部失敗");
   if (!sawBegin) {
     var tail = text.trim().slice(-300);

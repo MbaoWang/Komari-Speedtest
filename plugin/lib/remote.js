@@ -253,6 +253,9 @@ function buildRemoteCommand(opts) {
     'command -v curl >/dev/null 2>&1 || { echo "@@ERR|nocurl|節點缺少 curl，請先安裝 curl"; exit 2; }',
     'TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout"',
     'echo "@@BEGIN|2|$(uname -s)|$(uname -m)"',
+    // 網卡收發位元組（rx|tx），排除 lo 與 docker / veth 等虛擬網卡，避免重複計算
+    "netdev() { awk 'NR > 2 { sub(/^ +/, \"\"); i = index($0, \":\"); n = substr($0, 1, i - 1); if (n == \"lo\" || n ~ /^(veth|docker|br-|virbr|cni|flannel|cali|ifb)/) next; split(substr($0, i + 1), f, \" \"); rx += f[1]; tx += f[9] } END { printf \"%.0f|%.0f\", rx, tx }' /proc/net/dev 2>/dev/null; }",
+    'NT0=$(netdev)',
     'ip4=$(curl -4 -fsS -m 6 https://4.ipw.cn 2>/dev/null || curl -4 -fsS -m 6 https://api.ipify.org 2>/dev/null); ip4=$(printf "%s" "$ip4" | tr -cd "0-9.")',
     'ip6=$(curl -6 -fsS -m 6 https://6.ipw.cn 2>/dev/null || curl -6 -fsS -m 6 https://api6.ipify.org 2>/dev/null); ip6=$(printf "%s" "$ip6" | tr -cd "0-9a-fA-F:")',
     'echo "@@IP|4|$ip4"',
@@ -293,6 +296,7 @@ function buildRemoteCommand(opts) {
       "cat > \"$WORK/probe.sh\" <<'KCST_PROBE'",
       probeScript(pingCount),
       "KCST_PROBE",
+      'NL0=$(netdev)',
       'echo "@@LAT_BEGIN"',
       // xargs -P：工作池，不會因為一個不通的節點拖住整批
       'if echo x | xargs -P 2 -n 1 true >/dev/null 2>&1; then',
@@ -303,6 +307,7 @@ function buildRemoteCommand(opts) {
       "  wait",
       "fi",
       'echo "@@LAT_END"',
+      'echo "@@TRAFFIC|latency|$NL0|$(netdev)"',
       "fi"
     );
   }
@@ -342,7 +347,7 @@ function buildRemoteCommand(opts) {
       "    RETRIES=" + retries,
       "    for P in " + list.map(shQuote).join(" ") + "; do",
       "    for M in " + runModes.join(" ") + "; do",
-      '      TRY=0; BEST=""; BESTF=999',
+      '      TRY=0; BEST=""; BESTF=999; NP0=$(netdev)',
       "      while :; do",
       "        TRY=$((TRY+1))",
       '        S0=$(snmp); : > "$WORK/ss.log"',
@@ -368,6 +373,8 @@ function buildRemoteCommand(opts) {
       "        sleep 3",
       "      done",
       '      cat "$BEST"',
+      // 這個測速點（含重測）實際用掉的流量
+      '      echo "@@TRAFFIC|point|$NP0|$(netdev)|$P|$M"',
       '      if [ "$TRY" -gt 1 ]; then echo "@@RETRY|$P|$((TRY-1))|$BESTF|$M"; fi',
       '      rm -f "$WORK"/try.*',
       "    done",
@@ -377,7 +384,7 @@ function buildRemoteCommand(opts) {
     );
   }
 
-  L.push('echo "@@END"', "exit 0");
+  L.push('echo "@@TRAFFIC|total|$NT0|$(netdev)"', 'echo "@@END"', "exit 0");
   return L.join("\n");
 }
 
