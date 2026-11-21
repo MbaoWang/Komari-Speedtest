@@ -60,7 +60,8 @@ function retryNote(r) {
   if (!r || !r.retries || !r.retries.length) return "";
   return "已自動重測：" + r.retries.map(function (x) {
     var m = String(x.point).match(/^(.*?)(电信|联通|移动)?$/);
-    return tProv(m[1]) + tIsp(m[2] || "") + " ×" + x.retries + (x.stillFailed ? "（仍有失敗）" : "");
+    var md = x.mode === "multi" ? "多線程" : x.mode === "single" ? "單線程" : "";
+    return tProv(m[1]) + tIsp(m[2] || "") + (md ? "（" + md + "）" : "") + " ×" + x.retries + (x.stillFailed ? "（仍有失敗）" : "");
   }).join("、");
 }
 
@@ -189,6 +190,7 @@ function nodeResultHTML(job, nodeName, r, opts) {
   if (r.speed.length) {
     parts.push("\n<b>🚀 泰爾測速（Mbps）</b>");
     speedTable(r.speed, job.mode).forEach(function (t) { parts.push("<pre>" + esc(t.table) + "</pre>"); });
+    parts.push("<i>↓ 去程（中國→節點）　↑ 回程（節點→中國）</i>");
     var rt = retransTable(r.speed);
     if (rt) {
       parts.push("<b>🔁 回程 TCP 重傳率（測速期間，節點→中國）</b>");

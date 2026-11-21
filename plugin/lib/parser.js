@@ -133,7 +133,7 @@ function parseOutput(raw, exitCode) {
       case "@@ERR": res.errors.push(p.slice(2).join("|") || p[1]); break;
       case "@@WARN": res.warnings.push(p.slice(2).join("|") || p[1]); break;
       case "@@SPERR": if (last && p.slice(1).join("|").trim()) last.err.push(p.slice(1).join("|").trim()); break;
-      case "@@SPEED_BEGIN": cur = { point: p[1] || "", lines: [], rc: null, rtx: {}, snmp: null, err: [] }; break;
+      case "@@SPEED_BEGIN": cur = { point: p[1] || "", mode: p[2] || "", lines: [], rc: null, rtx: {}, snmp: null, err: [] }; break;
       case "@@RTX":
         if (last) last.rtx[p[1] === "6" ? "6" : "4"] = { dso: num(p[2]) || 0, rt: num(p[3]) || 0, dsi: num(p[4]) || 0, oo: num(p[5]) || 0, conns: num(p[6]) || 0 };
         break;
@@ -141,7 +141,7 @@ function parseOutput(raw, exitCode) {
         var tries = num(p[2]) || 0;
         var left = num(p[3]);
         if (last) last.retries = tries;
-        res.retries.push({ point: p[1] || "", retries: tries, stillFailed: left !== null && left > 0 });
+        res.retries.push({ point: p[1] || "", retries: tries, stillFailed: left !== null && left > 0, mode: p[4] || "" });
         break;
       }
       case "@@RTXS": {
@@ -174,15 +174,34 @@ function parseOutput(raw, exitCode) {
   }
   if (cur) blocks.push(cur); // 被中止、沒有 SPEED_END
   var anyRows = false;
+  var merged = {};
+  var order = [];
   blocks.forEach(function (b) {
     var arr = extractJsonArray(b.lines.join("\n"));
-    if (arr && arr.length) {
-      anyRows = true;
-      res.speed = res.speed.concat(applyRetrans(parseSpeedRows(arr), b).map(function (r) { r.retries = b.retries || 0; return r; }));
-    } else {
-      res.warnings.push("泰爾測速 " + (b.point || "") + " 沒有結果（exit " + b.rc + "）" + (b.err.length ? "：" + b.err.join(" / ") : ""));
+    if (!arr || !arr.length) {
+      res.warnings.push("泰爾測速 " + (b.point || "") + (b.mode ? "（" + (b.mode === "multi" ? "多線程" : "單線程") + "）" : "") + " 沒有結果（exit " + b.rc + "）" + (b.err.length ? "：" + b.err.join(" / ") : ""));
+      return;
     }
+    anyRows = true;
+    applyRetrans(parseSpeedRows(arr), b).forEach(function (r) {
+      r.retries = b.retries || 0;
+      // 單線程 / 多線程分開執行時，只取該模式的欄位
+      if (b.mode === "single") { r.multiDown = null; r.multiUp = null; }
+      if (b.mode === "multi") { r.singleDown = null; r.singleUp = null; }
+      var key = r.region + "|" + r.family;
+      var e = merged[key];
+      if (!e) { merged[key] = r; order.push(key); r.rtxMode = b.mode; return; }
+      if (b.mode === "single") { e.singleDown = r.singleDown; e.singleUp = r.singleUp; }
+      else if (b.mode === "multi") { e.multiDown = r.multiDown; e.multiUp = r.multiUp; }
+      if (e.rtt === null || e.rtt === undefined) e.rtt = r.rtt;
+      // 回程重傳率以單線程那次為準（與 TcpQuality 相同）
+      if (r.rtxSource && (b.mode === "single" || !e.rtxSource)) {
+        e.upRetrans = r.upRetrans; e.rtxSource = r.rtxSource; e.upSegs = r.upSegs; e.retransSegs = r.retransSegs; e.rtxMode = b.mode;
+      }
+      e.retries = Math.max(e.retries || 0, r.retries);
+    });
   });
+  order.forEach(function (k) { res.speed.push(merged[k]); });
   if (blocks.length && !anyRows) res.errors.push("泰爾測速全部失敗");
   if (!sawBegin) {
     var tail = text.trim().slice(-300);
