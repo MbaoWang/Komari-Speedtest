@@ -261,7 +261,13 @@ function createJobManager(server, getConfig) {
   function cancel(id) {
     var job = load().jobs.filter(function (j) { return j.id === id; })[0];
     if (!job || job.status !== "running") return false;
+    var pendingNodes = job.clients.filter(function (u) { return !job.results[u]; });
     finishJob(job, "cancelled");
+    // 也停止節點上還在跑的測試，避免節點一直顯示「已有測速任務在執行」
+    if (pendingNodes.length) {
+      server.call("admin:exec", { command: remote.buildCancelCommand(job.id), clients: pendingNodes })
+        .then(null, function (e) { console.warn("[cn-speedtest] 停止節點測試失敗：" + errText(e)); });
+    }
     return true;
   }
 

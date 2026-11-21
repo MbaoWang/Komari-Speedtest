@@ -403,7 +403,7 @@
     var c = e.target.closest("[data-cancel]");
     if (c) {
       e.stopPropagation();
-      if (!confirm("取消這個任務？（節點端已開始的測試會自行跑完，只是不再等待結果）")) return;
+      if (!confirm("取消這個任務？節點上正在進行的測試也會停止。")) return;
       api("POST", "/cancel", { id: c.getAttribute("data-cancel") }).then(refresh);
       return;
     }
