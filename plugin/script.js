@@ -214,6 +214,7 @@ function registerRoutes() {
       }),
       jobs: mgr.jobs().map(jobSummary),
       historyKeep: c.historyKeep,
+      lastSettings: mgr.getWebPrefs(),
       provinces: remote.PROVINCES,
       defaults: { family: c.defaultFamily, mode: c.defaultMode, points: c.defaultPoints, isps: c.defaultIsps, duration: c.duration, retries: c.speedRetries },
       publicPage: { enabled: c.publicEnabled, url: "/api/plugin/" + SHORT + "/public/" },
@@ -225,7 +226,14 @@ function registerRoutes() {
     var b = parseBody(req);
     if (!Array.isArray(b.clients) || !b.clients.length) throw new Error("請選擇至少一個節點");
     var job = await mgr.run({ clients: b.clients, type: b.type, family: b.family, points: b.points, mode: b.mode, isps: b.isps, origin: { kind: "web" } });
+    // 記住這次的設定，下次打開頁面沿用
+    mgr.setWebPrefs({ clients: b.clients.filter(function (u) { return typeof u === "string"; }).slice(0, 200), type: job.type, family: job.family, points: job.points, mode: job.mode, isps: job.isps });
     return jobSummary(job);
+  });
+
+  adminRoute("POST", "/jobs/delete", async function (req) {
+    var b = parseBody(req);
+    return { deleted: mgr.deleteJob(String(b.id || "")) };
   });
 
   adminRoute("POST", "/jobs/clear", async function () {

@@ -113,7 +113,7 @@ function createBot(getConfig, mgr) {
   function session(chatId) {
     var c = cfg();
     var s = sessions[chatId];
-    if (!s) { s = sessions[chatId] = { points: c.defaultPoints, mode: c.defaultMode, isps: c.defaultIsps }; }
+    if (!s) { s = sessions[chatId] = { points: c.defaultPoints, mode: c.defaultMode, isps: c.defaultIsps, family: c.defaultFamily }; }
     if (!Array.isArray(s.isps)) s.isps = c.defaultIsps;
     return s;
   }
@@ -170,55 +170,84 @@ function createBot(getConfig, mgr) {
     return { text: text, markup: { inline_keyboard: rows } };
   }
 
-  async function nodeView(chatId, target) {
-    var s = session(chatId);
-    var title;
-    var info = "";
+  var TYPE_NAME = { s: "🚀 泰爾測速", p: "📶 三網延遲 / 丟包", f: "🧪 完整測試（延遲 + 測速）" };
+  var TYPE_START = { s: "▶️ 開始測速", p: "▶️ 開始延遲測試", f: "▶️ 開始完整測試" };
+
+  // 解析 callback 的「項目代號 + 節點」，相容舊版按鈕（沒有項目代號時當作測速）
+  function kt(parts, from) {
+    var k = parts[from];
+    if ((k === "s" || k === "p" || k === "f") && parts.length > from + 1) return { k: k, t: parts.slice(from + 1).join(":") };
+    return { k: "s", t: parts.slice(from).join(":") };
+  }
+
+  async function nodeHeader(target) {
     if (target === "all") {
       var list = await mgr.nodes();
       var on = list.filter(function (n) { return n.online && !/windows/i.test(n.os) && (cfg().tgShowHidden || !n.hidden); });
-      title = "🌐 全部在線節點（" + on.length + " 台）";
-      info = "⚠️ 會對所有在線節點同時下發測試";
-    } else {
-      var n = (await mgr.nodes()).filter(function (x) { return x.uuid === target; })[0];
-      if (!n) return { text: "找不到節點，可能已被刪除。", markup: { inline_keyboard: [[{ text: "⬅️ 返回", callback_data: "h:0" }]] } };
-      title = (n.online ? "🟢 " : "⚪ ") + fmt.esc(n.name);
-      var bits = [];
-      if (n.region) bits.push(fmt.esc(n.region));
-      if (n.os) bits.push(fmt.esc(n.os));
-      if (n.arch) bits.push(fmt.esc(n.arch));
-      info = bits.join("｜");
-      var last = mgr.latest(n.uuid);
-      if (last && last.ping) info += "\n上次延遲：" + fmt.esc(fmt.fmtTime(last.ping.at));
-      if (last && last.speed) info += "\n上次測速：" + fmt.esc(fmt.fmtTime(last.speed.at));
-      if (!n.online) info += "\n⚠️ 節點離線，無法測試";
+      return { ok: true, title: "🌐 全部在線節點（" + on.length + " 台）", info: "⚠️ 會對所有在線節點同時下發測試" };
     }
-    var text = "<b>" + title + "</b>\n" + info + "\n\n" +
-      "📍 測速點：<b>" + fmt.esc(fmt.pointsLabel(s.points)) + "</b>\n" +
-      "⚙️ 測速模式：<b>" + fmt.modeLabel(s.mode) + "</b>\n" +
-      "📡 運營商：<b>" + fmt.ispsLabel(s.isps) + "</b>\n\n" +
-      "選擇測試項目 👇";
+    var n = (await mgr.nodes()).filter(function (x) { return x.uuid === target; })[0];
+    if (!n) return { ok: false };
+    var bits = [];
+    if (n.region) bits.push(fmt.esc(n.region));
+    if (n.os) bits.push(fmt.esc(n.os));
+    if (n.arch) bits.push(fmt.esc(n.arch));
+    var info = bits.join("｜");
+    var last = mgr.latest(n.uuid);
+    if (last && last.speed) info += "\n上次測速：" + fmt.esc(fmt.fmtTime(last.speed.at));
+    if (last && last.ping) info += "\n上次延遲：" + fmt.esc(fmt.fmtTime(last.ping.at));
+    if (!n.online) info += "\n⚠️ 節點離線，無法測試";
+    return { ok: true, title: (n.online ? "🟢 " : "⚪ ") + fmt.esc(n.name), info: info };
+  }
+
+  var GONE = { text: "找不到節點，可能已被刪除。", markup: { inline_keyboard: [[{ text: "⬅️ 返回", callback_data: "h:0" }]] } };
+
+  // 第一層：選測試項目
+  async function nodeView(chatId, target) {
+    var hd = await nodeHeader(target);
+    if (!hd.ok) return GONE;
     var t = target;
     var rows = [
-      [{ text: "📶 延遲 IPv4", callback_data: "r:p4:" + t }, { text: "📶 延遲 IPv6", callback_data: "r:p6:" + t }, { text: "📶 延遲 雙棧", callback_data: "r:pb:" + t }],
-      [{ text: "🚀 測速 IPv4", callback_data: "r:s4:" + t }, { text: "🚀 測速 IPv6", callback_data: "r:s6:" + t }, { text: "🚀 測速 雙棧", callback_data: "r:sb:" + t }],
-      [{ text: "🧪 完整 IPv4", callback_data: "r:f4:" + t }, { text: "🧪 完整 IPv6", callback_data: "r:f6:" + t }, { text: "🧪 完整 雙棧", callback_data: "r:fb:" + t }],
-      [{ text: "📍 選擇測速點", callback_data: "pt:" + t }, { text: "⚙️ 模式：" + fmt.modeLabel(s.mode), callback_data: "mc:" + t }],
-      [{ text: "📡 運營商：" + fmt.ispsLabel(s.isps), callback_data: "ic:" + t }]
+      [{ text: "🚀 泰爾測速", callback_data: "t:s:" + t }, { text: "📶 三網延遲", callback_data: "t:p:" + t }, { text: "🧪 完整測試", callback_data: "t:f:" + t }]
     ];
     if (target !== "all") rows.push([{ text: "📄 上次結果", callback_data: "l:" + t }, { text: "⬅️ 返回節點列表", callback_data: "h:0" }]);
     else rows.push([{ text: "⬅️ 返回節點列表", callback_data: "h:0" }]);
-    return { text: text, markup: { inline_keyboard: rows } };
+    return { text: "<b>" + hd.title + "</b>\n" + hd.info + "\n\n選擇測試項目 👇", markup: { inline_keyboard: rows } };
   }
 
-  function ispView(chatId, target) {
+  // 第二層：該項目的設定 + 開始按鈕
+  async function typeView(chatId, k, target) {
+    var hd = await nodeHeader(target);
+    if (!hd.ok) return GONE;
+    var s = session(chatId);
+    var fam = s.family || cfg().defaultFamily;
+    var t = target, kk = k + ":" + t;
+    var lines = ["<b>" + hd.title + "｜" + TYPE_NAME[k] + "</b>", "",
+      "🌐 IP 協議：<b>" + fmt.familyLabel(fam) + "</b>",
+      "📡 運營商：<b>" + fmt.ispsLabel(s.isps) + "</b>"];
+    if (k !== "p") {
+      lines.push("📍 測速點：<b>" + fmt.esc(fmt.pointsLabel(s.points)) + "</b>");
+      lines.push("⚙️ 測速模式：<b>" + fmt.modeLabel(s.mode) + "</b>");
+    }
+    lines.push("", "調整設定後按下方開始 👇");
+    var famBtn = function (f, label) { return { text: (fam === f ? "✅ " : "") + label, callback_data: "fm:" + f + ":" + kk }; };
+    var rows = [[famBtn("4", "IPv4"), famBtn("6", "IPv6"), famBtn("both", "雙棧")]];
+    if (k !== "p") rows.push([{ text: "📍 測速點：" + fmt.pointsLabel(s.points).slice(0, 14), callback_data: "pt:" + kk }, { text: "⚙️ 模式：" + fmt.modeLabel(s.mode), callback_data: "mc:" + kk }]);
+    rows.push([{ text: "📡 運營商：" + fmt.ispsLabel(s.isps), callback_data: "ic:" + kk }]);
+    rows.push([{ text: TYPE_START[k], callback_data: "r:" + k + (fam === "both" ? "b" : fam) + ":" + t }]);
+    rows.push([{ text: "⬅️ 返回", callback_data: "n:" + t }]);
+    return { text: lines.join("\n"), markup: { inline_keyboard: rows } };
+  }
+
+  function ispView(chatId, k, target) {
     var s = session(chatId);
     var all = !s.isps.length;
+    var kk = k + ":" + target;
     var names = [["电信", "電信"], ["联通", "聯通"], ["移动", "移動"]];
     var rows = [
-      [{ text: (all ? "✅ " : "") + "三網（全部）", callback_data: "it:a:" + target }],
-      names.map(function (n, i) { return { text: (!all && s.isps.indexOf(n[0]) >= 0 ? "✅ " : "") + n[1], callback_data: "it:" + i + ":" + target }; }),
-      [{ text: "✔️ 完成", callback_data: "n:" + target }]
+      [{ text: (all ? "✅ " : "") + "三網（全部）", callback_data: "it:a:" + kk }],
+      names.map(function (n, i) { return { text: (!all && s.isps.indexOf(n[0]) >= 0 ? "✅ " : "") + n[1], callback_data: "it:" + i + ":" + kk }; }),
+      [{ text: "✔️ 完成", callback_data: "t:" + kk }]
     ];
     return {
       text: "<b>📡 選擇運營商</b>（可多選）\n目前：<b>" + fmt.ispsLabel(s.isps) + "</b>\n\n同時套用到延遲 / 丟包與泰爾測速。\n<i>文字指令也可以加：測速 節點名 電信 聯通</i>",
@@ -226,18 +255,19 @@ function createBot(getConfig, mgr) {
     };
   }
 
-  function pointsView(chatId, target) {
+  function pointsView(chatId, k, target) {
     var s = session(chatId);
+    var kk = k + ":" + target;
     var selected = s.points ? s.points.split(",") : [];
-    var rows = [[{ text: (selected.length ? "" : "✅ ") + "北上廣三網（預設）", callback_data: "ps:b:" + target }]];
+    var rows = [[{ text: (selected.length ? "" : "✅ ") + "北上廣（預設）", callback_data: "ps:b:" + kk }]];
     var row = [];
     remote.PROVINCES.forEach(function (p, i) {
-      row.push({ text: (selected.indexOf(p) >= 0 ? "✅" : "") + fmt.tProv(p), callback_data: "ps:" + i + ":" + target });
+      row.push({ text: (selected.indexOf(p) >= 0 ? "✅" : "") + fmt.tProv(p), callback_data: "ps:" + i + ":" + kk });
       if (row.length === 4) { rows.push(row); row = []; }
     });
     if (row.length) rows.push(row);
-    rows.push([{ text: "✔️ 完成", callback_data: "n:" + target }]);
-    var text = "<b>📍 選擇測速點</b>（可多選，每個地點測電信 / 聯通 / 移動）\n" +
+    rows.push([{ text: "✔️ 完成", callback_data: "t:" + kk }]);
+    var text = "<b>📍 選擇測速點</b>（可多選，依「運營商」設定測各家）\n" +
       "目前：<b>" + fmt.esc(fmt.pointsLabel(s.points)) + "</b>\n\n" +
       "<i>指定單一運營商可用文字指令，例如：測速 節點名 上海电信,广东移动</i>";
     return { text: text, markup: { inline_keyboard: rows } };
@@ -260,11 +290,11 @@ function createBot(getConfig, mgr) {
     return [
       "<b>❓ 使用說明</b>",
       "",
-      "<b>互動選單</b>：/menu → 選節點 → 選測試項目",
+      "<b>互動選單</b>：/menu → 選節點 → 選測試項目（泰爾測速 / 三網延遲 / 完整）→ 調整協議、運營商、測速點、模式 → 開始",
       "",
       "<b>指令 / 關鍵字</b>（可不加斜線）：",
-      "<code>/ping 節點 [v4|v6|雙棧] [電信|聯通|移動]</code>  延遲 / 丟包",
       "<code>/speed 節點 [v4|v6|雙棧] [測速點] [單|多|單多]</code>  泰爾測速",
+      "<code>/ping 節點 [v4|v6|雙棧] [電信|聯通|移動]</code>  延遲 / 丟包",
       "<code>/full 節點 [v4|v6|雙棧] [測速點]</code>  延遲 + 測速",
       "<code>/last 節點</code>  上次結果",
       "<code>/nodes</code>  節點列表（可用編號代替名稱）",
@@ -504,9 +534,17 @@ function createBot(getConfig, mgr) {
         case "n": view = await nodeView(chatId, parts.slice(1).join(":")); break;
         case "j": view = jobsView(); break;
         case "hp": view = { text: helpText(), markup: { inline_keyboard: [[{ text: "⬅️ 返回", callback_data: "h:0" }]] } }; break;
-        case "pt": view = pointsView(chatId, parts.slice(1).join(":")); break;
+        case "t": { var a0 = kt(parts, 1); view = await typeView(chatId, a0.k, a0.t); break; }
+        case "fm": {
+          var a1 = kt(parts, 2);
+          s.family = parts[1] === "4" || parts[1] === "6" ? parts[1] : "both";
+          saveState();
+          view = await typeView(chatId, a1.k, a1.t);
+          break;
+        }
+        case "pt": { var a2 = kt(parts, 1); view = pointsView(chatId, a2.k, a2.t); break; }
         case "ps": {
-          var target = parts.slice(2).join(":");
+          var a3 = kt(parts, 2);
           if (parts[1] === "b") s.points = "";
           else {
             var prov = remote.PROVINCES[Number(parts[1])];
@@ -517,12 +555,12 @@ function createBot(getConfig, mgr) {
             s.points = sel.join(",");
           }
           saveState();
-          view = pointsView(chatId, target);
+          view = pointsView(chatId, a3.k, a3.t);
           break;
         }
-        case "ic": view = ispView(chatId, parts.slice(1).join(":")); break;
+        case "ic": { var a4 = kt(parts, 1); view = ispView(chatId, a4.k, a4.t); break; }
         case "it": {
-          var tgt = parts.slice(2).join(":");
+          var a5 = kt(parts, 2);
           if (parts[1] === "a") s.isps = [];
           else {
             var isp = ["电信", "联通", "移动"][Number(parts[1])];
@@ -532,13 +570,14 @@ function createBot(getConfig, mgr) {
             s.isps = remote.normIsps(cur);
           }
           saveState();
-          view = ispView(chatId, tgt);
+          view = ispView(chatId, a5.k, a5.t);
           break;
         }
         case "mc": {
+          var a6 = kt(parts, 1);
           s.mode = s.mode === "single" ? "multi" : s.mode === "multi" ? "both" : "single";
           saveState();
-          view = await nodeView(chatId, parts.slice(1).join(":"));
+          view = await typeView(chatId, a6.k, a6.t);
           toast = "模式：" + fmt.modeLabel(s.mode);
           break;
         }
@@ -551,6 +590,7 @@ function createBot(getConfig, mgr) {
           var code = parts[1] || "p4";
           var type = code.charAt(0) === "s" ? "speed" : code.charAt(0) === "f" ? "full" : "ping";
           var fam = code.charAt(1) === "b" ? "both" : code.charAt(1);
+          if (fam === "4" || fam === "6" || fam === "both") { s.family = fam; saveState(); }
           await api("answerCallbackQuery", { callback_query_id: q.id, text: "已派發 " + fmt.typeLabel(type) });
           await startJob(chatId, null, type, fam, parts.slice(2).join(":"), s.points, s.mode, s.isps);
           return;
@@ -618,8 +658,8 @@ function createBot(getConfig, mgr) {
       await api("setMyCommands", {
         commands: [
           { command: "menu", description: "互動式選單" },
-          { command: "ping", description: "三網延遲：/ping 節點 [v4|v6|雙棧]" },
           { command: "speed", description: "泰爾測速：/speed 節點 [v4|v6] [測速點]" },
+          { command: "ping", description: "三網延遲：/ping 節點 [v4|v6|雙棧]" },
           { command: "full", description: "延遲 + 測速：/full 節點" },
           { command: "nodes", description: "節點列表" },
           { command: "last", description: "上次結果：/last 節點" },

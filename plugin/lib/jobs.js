@@ -281,6 +281,21 @@ function createJobManager(server, getConfig) {
     return before - s.jobs.length;
   }
 
+  // 刪除單筆已結束的任務紀錄（執行中的要先取消）
+  function deleteJob(id) {
+    var s = load();
+    var job = s.jobs.filter(function (j) { return j.id === id; })[0];
+    if (!job) return false;
+    if (job.status === "running") throw new Error("任務執行中，請先取消再刪除");
+    s.jobs = s.jobs.filter(function (j) { return j.id !== id; });
+    save();
+    return true;
+  }
+
+  // 後台頁面上次使用的測試設定（下次打開頁面沿用）
+  function getWebPrefs() { return load().webPrefs || null; }
+  function setWebPrefs(p) { load().webPrefs = p; save(); }
+
   function getJob(id) { return load().jobs.filter(function (j) { return j.id === id; })[0] || null; }
   function jobs() { return load().jobs; }
   function latest(uuid) { return load().latest[uuid] || null; }
@@ -295,7 +310,7 @@ function createJobManager(server, getConfig) {
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
   }
 
-  return { start: start, shutdown: shutdown, run: run, clearFinished: clearFinished, setImage: setImage, cancel: cancel, nodes: nodes, nodeName: nodeName, getJob: getJob, jobs: jobs, latest: latest, running: running, on: on };
+  return { start: start, shutdown: shutdown, run: run, deleteJob: deleteJob, getWebPrefs: getWebPrefs, setWebPrefs: setWebPrefs, clearFinished: clearFinished, setImage: setImage, cancel: cancel, nodes: nodes, nodeName: nodeName, getJob: getJob, jobs: jobs, latest: latest, running: running, on: on };
 }
 
 module.exports = { createJobManager: createJobManager };

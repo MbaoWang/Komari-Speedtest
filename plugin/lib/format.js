@@ -65,7 +65,7 @@ function retryNote(r) {
 }
 
 function pointsLabel(p) {
-  return p ? p : "北上廣三網";
+  return p ? p : "北上廣";
 }
 
 // 延遲：每個協議一張「省份 × 三網」表，格內為 平均ms（丟包率>0 時附上 %）
