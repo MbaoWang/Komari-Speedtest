@@ -197,3 +197,32 @@ test("繁體 → 簡體轉換與語言判斷", () => {
   assert.strictEqual(zh.normLang("zh-TW"), "zh_TW");
   assert.strictEqual(zh.normLang("en"), null);
 });
+
+test("消耗流量解析與顯示", () => {
+  const out = [
+    "@@BEGIN|2|Linux|x86_64",
+    "@@LAT_BEGIN", "@@LAT|4|上海|电信|h|20|20|1|2|3|0.5|0", "@@LAT_END",
+    "@@TRAFFIC|latency|1000|2000|1001000|1502000",
+    "@@SPEED_BEGIN|广东移动|single",
+    '[{"region":"广东移动","family":"IPv4","rtt":"18ms","single_down_f":490,"single_up_f":487}]',
+    "@@SPEED_END|0",
+    "@@SPEED_BEGIN|广东移动|multi",
+    '[{"region":"广东移动","family":"IPv4","rtt":"18ms","multi_down_f":496,"multi_up_f":502}]',
+    "@@SPEED_END|0",
+    "@@TRAFFIC|point|1001000|1502000|1074742824|538372824|广东移动|single",
+    "@@TRAFFIC|point|1074742824|538372824|2148484648|1075243648|广东移动|multi",
+    "@@TRAFFIC|total|0|0|2150000000|1076000000",
+    "@@END"
+  ].join("\n");
+  const r = parser.parseOutput(out, 0);
+  assert.deepStrictEqual(r.traffic.total, { rx: 2150000000, tx: 1076000000 });
+  assert.strictEqual(r.traffic.latency.rx, 1000000);
+  assert.strictEqual(r.traffic.speed.rx, 2147483648);
+  assert.strictEqual(r.speed[0].trafficRx, 2147483648);
+  assert.strictEqual(fmt.fmtBytes(2147483648), "2.00 GB");
+  assert.match(fmt.trafficText(r), /共 3\.00 GB（下載 2\.00 GB／上傳 1\.00 GB）/);
+  const html = fmt.nodeResultHTML({ type: "full", family: "4", points: "广东", mode: "both" }, "n", r, {});
+  assert.match(html, /📦 消耗流量/);
+  const png = require("../plugin/lib/render.js").renderResult({ type: "full", family: "4", points: "广东", mode: "both" }, "n", r, {});
+  assert.ok(png.length > 1000);
+});

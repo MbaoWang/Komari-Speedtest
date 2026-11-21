@@ -195,6 +195,7 @@ function renderResult(job, nodeName, r, opts) {
   if (fams.length) h += 28;
   var msgs = (r ? r.errors.map(function (e) { return "錯誤：" + e; }) : ["沒有收到節點結果"]);
   var notes = r && fmt.retryNote(r) ? ["※ " + fmt.retryNote(r)] : [];
+  if (r && fmt.trafficText(r)) notes.unshift(fmt.trafficText(r));
   h += notes.length * 28;
   h += msgs.length * 28 + 56;
 
@@ -256,6 +257,7 @@ function renderResult(job, nodeName, r, opts) {
     if (single) cols.push({ k: "singleDown", t: "單線程↓" }, { k: "singleUp", t: "單線程↑" });
     if (multi) cols.push({ k: "multiDown", t: "多線程↓" }, { k: "multiUp", t: "多線程↑" });
     cols.push({ k: "upRetrans", t: "回程重傳" });
+    if (rows.some(function (x) { return x.trafficRx !== undefined; })) cols.push({ k: "traffic", t: "流量" });
     var x0 = PAD + 170, cw = (W - 2 * PAD - 170) / cols.length;
     cv.rect(PAD, y, W - 2 * PAD, ROW, C.thBg);
     cv.text(PAD + 10, y + 4, "測速點", C.sub, C.thBg);
@@ -269,6 +271,7 @@ function renderResult(job, nodeName, r, opts) {
         var v = s[c.k], txt, col;
         if (c.k === "rtt") { txt = v === null ? "-" : fmt.fmtMs(v) + " ms"; col = latColor(v); }
         else if (c.k === "upRetrans") { txt = pctText(v) + (s.rtxSource === "snmp" ? "≈" : ""); col = pctColor(v); }
+        else if (c.k === "traffic") { txt = s.trafficRx === undefined ? "-" : fmt.fmtBytes(s.trafficRx + s.trafficTx); col = C.sub; }
         else { txt = v === null || v === undefined || v < 0.001 ? "失敗" : fmt.fmtMbps(v); col = txt === "失敗" ? C.bad : C.text; }
         cv.text(x0 + cw * (i + 1) - 14, y + 4, txt, col, bg, { align: "right" });
       });
@@ -282,7 +285,7 @@ function renderResult(job, nodeName, r, opts) {
     y += 28;
   }
 
-  notes.forEach(function (m) { cv.text(PAD, y + 4, m, C.mid, C.bg, { maxW: W - 2 * PAD }); y += 28; });
+  notes.forEach(function (m) { cv.text(PAD, y + 4, m, m.charAt(0) === "※" ? C.mid : C.text, C.bg, { maxW: W - 2 * PAD }); y += 28; });
   msgs.forEach(function (m) { cv.text(PAD, y + 4, m, C.bad, C.bg, { maxW: W - 2 * PAD }); y += 28; });
   cv.rect(0, h - 40, W, 40, C.thBg);
   cv.text(PAD, h - 32, "Komari cn-speedtest　延遲 / 丟包：TCP 握手探測（TcpQuality 節點）　測速：泰爾測速", C.sub, C.thBg, { maxW: W - 2 * PAD });

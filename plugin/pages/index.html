@@ -179,6 +179,7 @@
   }
   function ms(v) { return v == null ? "-" : (v < 10 ? v.toFixed(1) : Math.round(v)); }
   function mbps(v) { return v == null || v < 0.001 ? '<span class="bad">失敗</span>' : (v >= 100 ? v.toFixed(0) : v.toFixed(1)); }
+  function bytes(n) { if (n == null || !isFinite(n)) return "-"; if (n >= 1073741824) return (n / 1073741824).toFixed(2) + " GB"; if (n >= 1048576) return (n / 1048576).toFixed(n >= 104857600 ? 0 : 1) + " MB"; return Math.round(n / 1024) + " KB"; }
   function pct(v) { return v == null ? "-" : (v < 10 ? v.toFixed(2) : v.toFixed(1)) + "%"; }
   function pctClass(v) { return v == null ? "" : v < 1 ? "good" : v < 5 ? "mid" : "bad"; }
   function latClass(v) { return v == null ? "bad" : v < 80 ? "good" : v < 180 ? "mid" : "bad"; }
@@ -288,6 +289,11 @@
     h += "</div>";
     if (r.latency && r.latency.length) h += latencyHTML(r.latency);
     if (r.speed && r.speed.length) h += speedHTML(r.speed, mode);
+    if (r.traffic && r.traffic.total) {
+      var t = r.traffic.total, sp = r.traffic.speed, lt = r.traffic.latency;
+      h += '<div class="small">📦 消耗流量：共 ' + bytes(t.rx + t.tx) + "（下載 " + bytes(t.rx) + "／上傳 " + bytes(t.tx) + "）" +
+        (sp && lt ? "，其中 測速 " + bytes(sp.rx + sp.tx) + "、延遲 " + bytes(lt.rx + lt.tx) : "") + "</div>";
+    }
     (r.retries || []).forEach(function (x) { h += '<div class="small">↻ 已自動重測 ' + esc(x.point) + " ×" + x.retries + (x.stillFailed ? '（<span class="bad">仍有失敗</span>）' : "（成功）") + "</div>"; });
     (r.errors || []).forEach(function (e) { h += '<div class="bad">❌ ' + esc(e) + "</div>"; });
     (r.warnings || []).slice(0, 5).forEach(function (e) { h += '<div class="small">⚠️ ' + esc(e) + "</div>"; });

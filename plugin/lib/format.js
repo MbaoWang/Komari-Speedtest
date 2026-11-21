@@ -198,6 +198,7 @@ function nodeResultHTML(job, nodeName, r, opts) {
       if (rt.approx) parts.push("<i>※ 節點沒有 ss，重傳率為系統整體計數器估算</i>");
     }
   }
+  if (trafficText(r)) parts.push("\n📦 " + esc(trafficText(r)));
   if (retryNote(r)) parts.push("↻ " + esc(retryNote(r)));
   if (r.errors.length) parts.push("\n❌ " + r.errors.map(esc).join("\n❌ "));
   if (r.warnings.length && opts.showWarnings !== false) parts.push("⚠️ " + r.warnings.slice(0, 4).map(esc).join("\n⚠️ "));
@@ -227,9 +228,29 @@ function shortSummaryHTML(job, nodeName, r) {
     if (rt.length) line += "，回程重傳 平均 " + fmtPct(avg(rt)) + "（最高 " + fmtPct(Math.max.apply(null, rt)) + "）";
     parts.push(esc(line));
   });
+  if (trafficText(r)) parts.push("📦 " + esc(trafficText(r)));
   if (retryNote(r)) parts.push("↻ " + esc(retryNote(r)).slice(0, 200));
   if (r.errors && r.errors.length) parts.push("❌ " + esc(r.errors.join("；")).slice(0, 300));
   return parts.join("\n");
+}
+
+function fmtBytes(n) {
+  if (n === null || n === undefined || !isFinite(n)) return "-";
+  if (n >= 1073741824) return (n / 1073741824).toFixed(2) + " GB";
+  if (n >= 1048576) return (n / 1048576).toFixed(n >= 104857600 ? 0 : 1) + " MB";
+  return Math.max(0, Math.round(n / 1024)) + " KB";
+}
+
+// 消耗流量（節點網卡在測試期間的收發量）
+function trafficText(r) {
+  var t = r && r.traffic && r.traffic.total;
+  if (!t) return "";
+  var s = "消耗流量：共 " + fmtBytes(t.rx + t.tx) + "（下載 " + fmtBytes(t.rx) + "／上傳 " + fmtBytes(t.tx) + "）";
+  var parts = [];
+  if (r.traffic.speed) parts.push("測速 " + fmtBytes(r.traffic.speed.rx + r.traffic.speed.tx));
+  if (r.traffic.latency) parts.push("延遲 " + fmtBytes(r.traffic.latency.rx + r.traffic.latency.tx));
+  if (parts.length > 1) s += "，其中 " + parts.join("、");
+  return s;
 }
 
 function fmtTime(iso) {
@@ -256,6 +277,6 @@ function splitMessage(html, limit) {
 
 module.exports = {
   esc: esc, tIsp: tIsp, tProv: tProv, fmtMs: fmtMs, fmtMbps: fmtMbps, fmtTime: fmtTime,
-  typeLabel: typeLabel, ispsLabel: ispsLabel, retryNote: retryNote, familyLabel: familyLabel, modeLabel: modeLabel, pointsLabel: pointsLabel,
+  typeLabel: typeLabel, fmtBytes: fmtBytes, trafficText: trafficText, ispsLabel: ispsLabel, retryNote: retryNote, familyLabel: familyLabel, modeLabel: modeLabel, pointsLabel: pointsLabel,
   latencyTables: latencyTables, speedTable: speedTable, retransTable: retransTable, fmtPct: fmtPct, shortSummaryHTML: shortSummaryHTML, nodeResultHTML: nodeResultHTML, splitMessage: splitMessage
 };
