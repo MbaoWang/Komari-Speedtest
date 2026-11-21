@@ -175,6 +175,8 @@ function createJobManager(server, getConfig) {
       points: points,
       mode: mode,
       isps: isps,
+      // 結果圖語言：設定固定時用設定，否則跟發起者（Telegram 聊天 / 後台頁面）
+      lang: cfg.lang !== "auto" ? cfg.lang : (spec.lang === "zh_CN" ? "zh_CN" : "zh_TW"),
       clients: uuids,
       names: {},
       skipped: { offline: offline, windows: winNodes, busy: busyList },

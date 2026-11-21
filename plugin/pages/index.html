@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="zh.js"></script>
 <title>中國網路測速</title>
 <style>
   :root {
@@ -422,7 +423,7 @@
   });
 
   function spec() {
-    return { clients: Object.keys(state.selected), type: segValue("type"), family: segValue("family"), points: $("points").value.trim(), mode: segValue("mode"), isps: ispsValue() };
+    return { clients: Object.keys(state.selected), type: segValue("type"), family: segValue("family"), points: $("points").value.trim(), mode: segValue("mode"), isps: ispsValue(), lang: window.KCST_LANG || "zh_TW" };
   }
 
   $("run").onclick = function () {

@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="zh.js"></script>
 <title>中國網路測速</title>
 <style>
   :root {
@@ -168,7 +169,7 @@
     }).then(function (d) {
       data = d;
       $("title").textContent = d.title;
-      document.title = d.title + (d.site ? " - " + d.site : "");
+      document.title = (window.KCST_T || String)(d.title + (d.site ? " - " + d.site : ""));
       $("sub").innerHTML = (d.site ? '<a href="/">' + esc(d.site) + "</a>　" : "") + "各節點到中國電信 / 聯通 / 移動的延遲、丟包、速度與回程重傳";
       render();
     }).catch(function (e) { $("list").innerHTML = '<div class="empty">' + esc(e.message) + "</div>"; });

@@ -57,6 +57,7 @@ function normalizeConfig(raw) {
     tgShowFullIp: bool(c.tg_show_full_ip, false),
     publicEnabled: bool(c.public_enabled, false),
     publicTitle: String(c.public_title || "").trim().slice(0, 60),
+    lang: c.language === "zh_TW" || c.language === "zh_CN" ? c.language : "auto",
     tgResultFormat: c.tg_result_format === "text" || c.tg_result_format === "both" ? c.tg_result_format : "image",
     imageEnabled: bool(c.image_enabled, true),
     imageUpload: c.image_upload === "catbox" || c.image_upload === "0x0" ? c.image_upload : "none",
@@ -225,7 +226,7 @@ function registerRoutes() {
   adminRoute("POST", "/run", async function (req) {
     var b = parseBody(req);
     if (!Array.isArray(b.clients) || !b.clients.length) throw new Error("請選擇至少一個節點");
-    var job = await mgr.run({ clients: b.clients, type: b.type, family: b.family, points: b.points, mode: b.mode, isps: b.isps, origin: { kind: "web" } });
+    var job = await mgr.run({ clients: b.clients, type: b.type, family: b.family, points: b.points, mode: b.mode, isps: b.isps, lang: b.lang, origin: { kind: "web" } });
     // 記住這次的設定，下次打開頁面沿用
     mgr.setWebPrefs({ clients: b.clients.filter(function (u) { return typeof u === "string"; }).slice(0, 200), type: job.type, family: job.family, points: job.points, mode: job.mode, isps: job.isps });
     return jobSummary(job);

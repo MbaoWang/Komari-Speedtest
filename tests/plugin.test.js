@@ -185,3 +185,15 @@ test("單線程 / 多線程分開執行後合併", () => {
   assert.match(cmd, /for M in single multi/);
   assert.match(remote.buildRemoteCommand({ runId: "split-2", speed: true, mode: "multi" }), /for M in multi;/);
 });
+
+test("繁體 → 簡體轉換與語言判斷", () => {
+  const zh = require("../plugin/lib/zh.js");
+  assert.strictEqual(zh.toCN("📋 節點選單｜🔄 重新整理"), "📋 节点菜单｜🔄 刷新");
+  assert.strictEqual(zh.toCN("預設網路設定，節點離線"), "默认网络设置，节点离线");
+  assert.strictEqual(zh.toCN("广东移动 IPv6 123"), "广东移动 IPv6 123");
+  assert.strictEqual(zh.normLang("zh-hans"), "zh_CN");
+  assert.strictEqual(zh.normLang("zh_CN"), "zh_CN");
+  assert.strictEqual(zh.normLang("zh-hant"), "zh_TW");
+  assert.strictEqual(zh.normLang("zh-TW"), "zh_TW");
+  assert.strictEqual(zh.normLang("en"), null);
+});
