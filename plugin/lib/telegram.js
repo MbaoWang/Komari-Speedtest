@@ -323,7 +323,8 @@ function createBot(getConfig, mgr) {
     var list = await mgr.nodes(true);
     if (target === "all") {
       uuids = list.filter(function (n) { return n.online && !/windows/i.test(n.os) && (cfg().tgShowHidden || !n.hidden); }).map(function (n) { return n.uuid; });
-    } else uuids = [target];
+    } else if (Array.isArray(target)) uuids = target.slice();
+    else uuids = [target];
     if (!uuids.length) throw new Error("沒有在線節點");
     var names = uuids.map(function (u) { return mgr.nodeName(u); });
     var statusMsg = await send(chatId,
@@ -350,7 +351,8 @@ function createBot(getConfig, mgr) {
     var f = job.family === "both" ? "b" : job.family;
     var t = job.type === "ping" ? "p" : job.type === "speed" ? "s" : "f";
     var target = job.clients.length > 1 ? "all" : uuid;
-    return { inline_keyboard: [[{ text: "🔁 再測一次", callback_data: "r:" + t + f + ":" + target }, { text: "📋 節點選單", callback_data: "n:" + uuid }]] };
+    // 「再測一次」照原任務的設定重跑（rr:任務ID）；原任務紀錄被刪掉時退回 r:（用聊天目前的設定）
+    return { inline_keyboard: [[{ text: "🔁 再測一次", callback_data: "rr:" + job.id + ":" + t + f + ":" + target }, { text: "📋 節點選單", callback_data: "n:" + uuid }]] };
   }
 
   async function sendPhoto(chatId, png, caption, extra) {
@@ -586,6 +588,18 @@ function createBot(getConfig, mgr) {
           await send(chatId, await lastResultText(parts.slice(1).join(":")));
           return;
         }
+        case "rr": {
+          var prev = mgr.getJob(parts[1]);
+          if (prev) {
+            await api("answerCallbackQuery", { callback_query_id: q.id, text: "照上次設定重測：" + fmt.typeLabel(prev.type) });
+            await startJob(chatId, null, prev.type, prev.family, prev.clients.length > 1 ? prev.clients : prev.clients[0], prev.points, prev.mode, prev.isps || []);
+            return;
+          }
+          // 找不到原任務（紀錄已刪除）：改用聊天目前的設定
+          parts = ["r"].concat(parts.slice(2));
+          toast = "找不到原任務紀錄，改用目前設定";
+        }
+        /* falls through */
         case "r": {
           var code = parts[1] || "p4";
           var type = code.charAt(0) === "s" ? "speed" : code.charAt(0) === "f" ? "full" : "ping";
