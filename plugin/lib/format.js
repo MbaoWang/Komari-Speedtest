@@ -190,7 +190,7 @@ function nodeResultHTML(job, nodeName, r, opts) {
   if (r.speed.length) {
     parts.push("\n<b>🚀 泰爾測速（Mbps）</b>");
     speedTable(r.speed, job.mode).forEach(function (t) { parts.push("<pre>" + esc(t.table) + "</pre>"); });
-    parts.push("<i>↓ 去程（中國→節點）　↑ 回程（節點→中國）</i>");
+    parts.push("↓ 去程（中國→節點）　↑ 回程（節點→中國）");
     var rt = retransTable(r.speed);
     if (rt) {
       parts.push("<b>🔁 回程 TCP 重傳率（測速期間，節點→中國）</b>");
