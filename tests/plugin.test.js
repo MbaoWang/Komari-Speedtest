@@ -164,3 +164,24 @@ test("自動重測結果解析", () => {
   assert.strictEqual(r.speed[0].retries, 1);
   assert.match(fmt.retryNote(r), /廣東移動 ×1（仍有失敗）/);
 });
+
+test("單線程 / 多線程分開執行後合併", () => {
+  const row = (m, up, dn) => `[{"region":"广东联通","family":"IPv6","rtt":"55ms","single_up_f":${m === "single" ? up : 0},"single_down_f":${m === "single" ? dn : 0},"multi_up_f":${m === "multi" ? up : 0},"multi_down_f":${m === "multi" ? dn : 0}}]`;
+  const out = [
+    "@@BEGIN|2|Linux|x86_64",
+    "@@SPEED_BEGIN|广东联通|single", row("single", 450, 306), "@@SPEED_END|0", "@@RTX|6|10000|50|20000|0|1",
+    "@@SPEED_BEGIN|广东联通|multi", row("multi", 0, 532), "@@SPEED_END|0", "@@RTX|6|40000|4000|80000|0|4",
+    "@@RETRY|广东联通|2|1|multi",
+    "@@END"
+  ].join("\n");
+  const r = parser.parseOutput(out, 0);
+  assert.strictEqual(r.speed.length, 1);
+  const s = r.speed[0];
+  assert.deepStrictEqual([s.singleUp, s.singleDown, s.multiUp, s.multiDown], [450, 306, 0, 532]);
+  assert.strictEqual(s.upRetrans, 0.5); // 取單線程那次
+  assert.strictEqual(s.retries, 2);
+  assert.match(fmt.retryNote(r), /廣東聯通（多線程） ×2（仍有失敗）/);
+  const cmd = remote.buildRemoteCommand({ runId: "split-1", speed: true, mode: "both" });
+  assert.match(cmd, /for M in single multi/);
+  assert.match(remote.buildRemoteCommand({ runId: "split-2", speed: true, mode: "multi" }), /for M in multi;/);
+});

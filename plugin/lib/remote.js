@@ -160,8 +160,9 @@ function estimateSeconds(opts) {
   if (opts.speed) {
     var points = expandPoints(opts.points || "", opts.isps).length;
     var modes = opts.mode === "both" ? 2 : 1;
-    t += 120 + points * (8 + fams * (modes * (2 * (opts.duration || 5) + 6) + 6));
-    if (opts.retries) t += Math.ceil(points * 0.3) * opts.retries * fams * (modes * (2 * (opts.duration || 5) + 6) + 6); // 預估約三成測速點需要重測
+    var perInvoke = 8 + fams * ((2 * (opts.duration || 5) + 6) + 6); // 單線程、多線程各自執行一次
+    t += 120 + points * modes * perInvoke;
+    if (opts.retries) t += Math.ceil(points * modes * 0.3) * opts.retries * (perInvoke - 8); // 預估約三成需要重測
   }
   return Math.min(t, 3600);
 }
@@ -307,10 +308,12 @@ function buildRemoteCommand(opts) {
 
   if (opts.speed) {
     var list = expandPoints(points, isps);
-    // 依模式判斷哪些欄位為 0 代表失敗
-    var failRe = mode === "single" ? "single_(up|down)_f" : mode === "multi" ? "multi_(up|down)_f" : "(single|multi)_(up|down)_f";
-    var perRun = Math.max(60, (family === "both" ? 2 : 1) * ((mode === "both" ? 2 : 1) * (2 * duration + 6) + 6) + 60);
-    var args = "--json --no-image --ip " + family + " --mode " + mode + " --duration " + duration;
+    // 「單+多」拆成兩次執行：泰爾測速每次執行只向伺服器排隊取得一把測速 key，
+    // 同一把 key 依序跑 單下 → 單上 → 多下 → 多上 時，最後的多線程上傳常被伺服器拒絕（key 逾時 / 次數用盡）。
+    // 單線程、多線程各自執行（各拿新 key）就不會有這個問題。
+    var runModes = mode === "both" ? ["single", "multi"] : [mode];
+    var perRun = Math.max(60, (family === "both" ? 2 : 1) * ((2 * duration + 6) + 6) + 60);
+    var args = "--json --no-image --ip " + family + " --duration " + duration;
     L.push(
       "# ---------- 測速 + 重傳率（泰爾測速 taierspeedtest-mod，每個測速點單獨執行並以 ss 取樣 TCP_INFO） ----------",
       'case "$(uname -m)" in x86_64|amd64) A=amd64 ;; aarch64|arm64) A=arm64 ;; *) A="" ;; esac',
@@ -333,24 +336,26 @@ function buildRemoteCommand(opts) {
       RTX_AWK,
       "KCST_RTX",
       // 有欄位失敗（速度為 0）或沒有結果時自動重測，保留失敗最少的那一次
-      "    fails() { if ! grep -q '\"region\"' \"$1\" 2>/dev/null; then echo 99; else grep -oE '\"" + failRe + "\": *0(\\.0+)?(,|}|$)' \"$1\" | wc -l | tr -d ' '; fi; }",
+      // fails 檔案 模式：該模式的上 / 下行速度為 0 的欄位數（沒有結果 = 99）
+      "    fails() { if ! grep -q '\"region\"' \"$1\" 2>/dev/null; then echo 99; else grep -oE \"\\\"$2_(up|down)_f\\\": *0(\\\\.0+)?(,|}|$)\" \"$1\" | wc -l | tr -d ' '; fi; }",
       "    RETRIES=" + retries,
       "    for P in " + list.map(shQuote).join(" ") + "; do",
+      "    for M in " + runModes.join(" ") + "; do",
       '      TRY=0; BEST=""; BESTF=999',
       "      while :; do",
       "        TRY=$((TRY+1))",
       '        S0=$(snmp); : > "$WORK/ss.log"',
-      '        $TS "$BIN" ' + args + ' --points "$P" </dev/null >"$WORK/sp.out" 2>"$WORK/sp.err" &',
+      '        $TS "$BIN" ' + args + ' --mode "$M" --points "$P" </dev/null >"$WORK/sp.out" 2>"$WORK/sp.err" &',
       "        SPID=$!",
       '        if [ "$HAS_SS" = 1 ]; then',
       '          while kill -0 "$SPID" 2>/dev/null; do ss -tinp 2>/dev/null | awk -f "$WORK/ss.awk" >> "$WORK/ss.log"; sleep 0.3 2>/dev/null || sleep 1; done',
       "        fi",
       '        wait "$SPID"; rc=$?',
       "        S1=$(snmp)",
-      '        F=$(fails "$WORK/sp.out")',
+      '        F=$(fails "$WORK/sp.out" "$M")',
       '        O="$WORK/try.$TRY"',
       "        {",
-      '          echo "@@SPEED_BEGIN|$P"',
+      '          echo "@@SPEED_BEGIN|$P|$M"',
       '          cat "$WORK/sp.out"',
       '          echo "@@SPEED_END|$rc"',
       '          [ -s "$WORK/ss.log" ] && awk -f "$WORK/rtx.awk" "$WORK/ss.log"',
@@ -362,8 +367,9 @@ function buildRemoteCommand(opts) {
       "        sleep 3",
       "      done",
       '      cat "$BEST"',
-      '      if [ "$TRY" -gt 1 ]; then echo "@@RETRY|$P|$((TRY-1))|$BESTF"; fi',
+      '      if [ "$TRY" -gt 1 ]; then echo "@@RETRY|$P|$((TRY-1))|$BESTF|$M"; fi',
       '      rm -f "$WORK"/try.*',
+      "    done",
       "    done",
       '  else echo "@@ERR|download|無法取得泰爾測速程式（可在插件設定填入鏡像網址）"; fi',
       "fi"
