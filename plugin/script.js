@@ -231,6 +231,11 @@ function registerRoutes() {
     return jobSummary(job);
   });
 
+  adminRoute("POST", "/jobs/delete", async function (req) {
+    var b = parseBody(req);
+    return { deleted: mgr.deleteJob(String(b.id || "")) };
+  });
+
   adminRoute("POST", "/jobs/clear", async function () {
     return { removed: mgr.clearFinished() };
   });

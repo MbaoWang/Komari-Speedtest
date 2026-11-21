@@ -104,7 +104,7 @@ speed tokyo 上海电信,北京联通
 
 - 預設保留最近 **40** 筆任務（設定「任務紀錄保留筆數」可調 10~200），超過自動刪除最舊的。
 - 最近 15 筆保留完整結果，更舊的只留摘要。
-- 後台「清除已完成」可一次刪除所有已結束的任務紀錄。
+- 後台任務列表：每筆已結束的任務右邊有「×」可單筆刪除；上方「一鍵清除」刪除全部已結束的任務。兩者都會先跳出確認視窗。執行中的任務顯示「取消」（同樣需確認）。
 - 各節點的「最新結果」（`/last`、公開頁、上次結果）另外保存，不受刪除影響。
 
 ## 結果圖
@@ -159,6 +159,7 @@ Telegram / 後台頁面
 | GET | `/api/plugin/cn-speedtest/latest?uuid=` | 節點最近結果 |
 | GET | `/api/plugin/cn-speedtest/image?file=` | 結果圖 PNG |
 | POST | `/api/plugin/cn-speedtest/cancel` | `{id}` 停止等待（節點端會自行跑完） |
+| POST | `/api/plugin/cn-speedtest/jobs/delete` | `{id}` 刪除單筆已結束的任務紀錄 |
 | POST | `/api/plugin/cn-speedtest/jobs/clear` | 清除已結束的任務紀錄 |
 | POST | `/api/plugin/cn-speedtest/preview` | 預覽節點指令 |
 | POST | `/api/plugin/cn-speedtest/telegram/test` | 傳送 Telegram 測試訊息 |

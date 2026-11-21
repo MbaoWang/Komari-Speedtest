@@ -61,6 +61,8 @@
   .cardhead h2 { margin: 0; }
   .small-btn { padding: 5px 12px; font-size: 13px; }
   .joblist { max-height: 420px; overflow: auto; }
+  .jobdel { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0; }
+  .jobdel:hover { color: var(--bad); border-color: var(--bad); }
   .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
 </style>
 </head>
@@ -121,7 +123,7 @@
 
     <div>
       <div class="card">
-        <div class="cardhead"><h2>任務 <span class="small" id="jobcount"></span></h2><button class="btn ghost small-btn" id="clearJobs">清除已完成</button></div>
+        <div class="cardhead"><h2>任務 <span class="small" id="jobcount"></span></h2><button class="btn ghost small-btn" id="clearJobs" title="刪除所有已完成的任務紀錄">一鍵清除</button></div>
         <div id="jobs" class="joblist"><div class="empty">載入中…</div></div>
       </div>
       <div class="card" id="resultCard" style="display:none">
@@ -211,7 +213,8 @@
         '<span class="badge ' + esc(j.status) + '">' + st + '</span>' +
         '<div class="what"><div>' + typeLabel(j.type) + "・" + famLabel(j.family) + "・" + ispsLabel(j.isps) + (j.type !== "ping" ? "・" + esc(j.points || "北上廣") + "・" + modeLabel(j.mode) : "") + '</div>' +
         '<div class="small">' + esc(names) + "｜" + fmtTime(j.startedAt) + "｜" + secs + " 秒" + (j.status === "running" ? "（預估 " + j.estimateSec + " 秒）" : "") + (j.origin === "tg" ? "｜Telegram" : j.origin === "cron" ? "｜定時" : "") + '</div></div>' +
-        (j.status === "running" ? '<button class="btn ghost" data-cancel="' + esc(j.id) + '">取消</button>' : "") +
+        (j.status === "running" ? '<button class="btn ghost small-btn" data-cancel="' + esc(j.id) + '">取消</button>'
+          : '<button class="jobdel" title="刪除這筆任務紀錄" aria-label="刪除" data-del="' + esc(j.id) + '">×</button>') +
         '</div>';
     }).join("");
   }
@@ -368,8 +371,10 @@
   });
   function ispsValue() { return Array.prototype.map.call($("isps").querySelectorAll("button.on"), function (x) { return x.getAttribute("data-v"); }); }
   $("clearJobs").onclick = function () {
-    if (!confirm("清除所有已完成的任務紀錄？（各節點的最新結果不受影響）")) return;
-    api("POST", "/jobs/clear").then(function (d) { showMsg("已清除 " + d.removed + " 筆任務紀錄"); state.viewing = null; refresh(); }).catch(function (e) { showMsg(e.message, true); });
+    var n = state.jobs.filter(function (j) { return j.status !== "running"; }).length;
+    if (!n) return showMsg("沒有可清除的任務紀錄");
+    if (!confirm("清除全部 " + n + " 筆已完成的任務紀錄？此動作無法復原。\n（執行中的任務與各節點的最新結果不受影響）")) return;
+    api("POST", "/jobs/clear").then(function (d) { showMsg("已清除 " + d.removed + " 筆任務紀錄"); state.viewing = null; $("resultCard").style.display = "none"; refresh(); }).catch(function (e) { showMsg(e.message, true); });
   };
 
 
@@ -395,7 +400,24 @@
 
   $("jobs").addEventListener("click", function (e) {
     var c = e.target.closest("[data-cancel]");
-    if (c) { e.stopPropagation(); api("POST", "/cancel", { id: c.getAttribute("data-cancel") }).then(refresh); return; }
+    if (c) {
+      e.stopPropagation();
+      if (!confirm("取消這個任務？（節點端已開始的測試會自行跑完，只是不再等待結果）")) return;
+      api("POST", "/cancel", { id: c.getAttribute("data-cancel") }).then(refresh);
+      return;
+    }
+    var del = e.target.closest("[data-del]");
+    if (del) {
+      e.stopPropagation();
+      var id = del.getAttribute("data-del");
+      if (!confirm("刪除這筆任務紀錄？此動作無法復原。\n（各節點的最新結果不受影響）")) return;
+      api("POST", "/jobs/delete", { id: id }).then(function () {
+        if (state.viewing === id) { state.viewing = null; $("resultCard").style.display = "none"; }
+        showMsg("已刪除 1 筆任務紀錄");
+        refresh();
+      }).catch(function (err) { showMsg(err.message, true); });
+      return;
+    }
     var j = e.target.closest("[data-job]"); if (j) showJob(j.getAttribute("data-job"));
   });
 
