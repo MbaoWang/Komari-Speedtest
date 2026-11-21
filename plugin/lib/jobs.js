@@ -281,6 +281,10 @@ function createJobManager(server, getConfig) {
     return before - s.jobs.length;
   }
 
+  // 後台頁面上次使用的測試設定（下次打開頁面沿用）
+  function getWebPrefs() { return load().webPrefs || null; }
+  function setWebPrefs(p) { load().webPrefs = p; save(); }
+
   function getJob(id) { return load().jobs.filter(function (j) { return j.id === id; })[0] || null; }
   function jobs() { return load().jobs; }
   function latest(uuid) { return load().latest[uuid] || null; }
@@ -295,7 +299,7 @@ function createJobManager(server, getConfig) {
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
   }
 
-  return { start: start, shutdown: shutdown, run: run, clearFinished: clearFinished, setImage: setImage, cancel: cancel, nodes: nodes, nodeName: nodeName, getJob: getJob, jobs: jobs, latest: latest, running: running, on: on };
+  return { start: start, shutdown: shutdown, run: run, getWebPrefs: getWebPrefs, setWebPrefs: setWebPrefs, clearFinished: clearFinished, setImage: setImage, cancel: cancel, nodes: nodes, nodeName: nodeName, getJob: getJob, jobs: jobs, latest: latest, running: running, on: on };
 }
 
 module.exports = { createJobManager: createJobManager };

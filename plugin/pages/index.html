@@ -80,11 +80,11 @@
         <div class="nodes" id="nodes"><div class="empty">載入中…</div></div>
       </div>
       <div class="card">
-        <h2>2. 測試設定</h2>
+        <h2>2. 測試設定 <span class="small" id="settingsNote"></span></h2>
         <label class="row">項目</label>
         <div class="seg" id="type">
-          <button data-v="ping" class="on">三網延遲</button>
-          <button data-v="speed">泰爾測速</button>
+          <button data-v="speed" class="on">泰爾測速</button>
+          <button data-v="ping">三網延遲</button>
           <button data-v="full">完整（兩者）</button>
         </div>
         <label class="row">IP 協議</label>
@@ -324,10 +324,20 @@
       state.nodes = d.nodes; state.jobs = d.jobs; state.provinces = d.provinces;
       if (firstLoad) {
         firstLoad = false;
-        setSeg("family", d.defaults.family); setSeg("mode", d.defaults.mode);
-        var di = d.defaults.isps && d.defaults.isps.length ? d.defaults.isps : ["电信", "联通", "移动"];
+        // 有測過就沿用上次的設定，否則用插件預設值（項目預設泰爾測速）
+        var last = d.lastSettings || null;
+        var init = last || { type: "speed", family: d.defaults.family, mode: d.defaults.mode, isps: d.defaults.isps, points: d.defaults.points, clients: [] };
+        setSeg("type", init.type || "speed");
+        $("speedOpts").style.display = init.type === "ping" ? "none" : "block";
+        setSeg("family", init.family); setSeg("mode", init.mode);
+        var di = init.isps && init.isps.length ? init.isps : ["电信", "联通", "移动"];
         Array.prototype.forEach.call($("isps").querySelectorAll("button"), function (x) { x.classList.toggle("on", di.indexOf(x.getAttribute("data-v")) >= 0); });
-        $("points").value = d.defaults.points || "";
+        $("points").value = init.points || "";
+        (init.clients || []).forEach(function (u) {
+          var n = d.nodes.filter(function (x) { return x.uuid === u; })[0];
+          if (n && n.online && !/windows/i.test(n.os)) state.selected[u] = true;
+        });
+        if (last) $("settingsNote").textContent = "（已套用上次測試的設定）";
         $("quickPoints").innerHTML = ['北上廣'].concat(["北京", "上海", "广东", "江苏", "浙江", "湖北", "四川", "福建"]).map(function (p) { return '<button data-p="' + esc(p) + '">' + esc(p) + "</button>"; }).join("");
         var tg = d.telegram;
         if (!tg.configured) $("tgtest").title = "尚未設定 Bot Token";
@@ -361,7 +371,7 @@
     if (!confirm("清除所有已完成的任務紀錄？（各節點的最新結果不受影響）")) return;
     api("POST", "/jobs/clear").then(function (d) { showMsg("已清除 " + d.removed + " 筆任務紀錄"); state.viewing = null; refresh(); }).catch(function (e) { showMsg(e.message, true); });
   };
-  $("speedOpts").style.display = "none";
+
 
   $("quickPoints").addEventListener("click", function (e) {
     var b = e.target.closest("button"); if (!b) return;
