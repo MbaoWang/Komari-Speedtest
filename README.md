@@ -175,7 +175,7 @@ node --test tests/*.test.js   # 單元測試（解析、丟包 / 重傳率、結
 python3 tools/build-font.py   # 重新產生內建字型（需要 Pillow 與 fonts-noto-cjk）
 ```
 
-發布：推送 `v*` 標籤（例如 `git tag v1.3.0 && git push origin v1.3.0`），GitHub Actions 會跑測試、打包並把 `cn-speedtest.zip` 附到 Release。
+發布：提高 `plugin/komari-plugin.json` 的 `version` 後合併到 `main`，GitHub Actions 會自動跑測試、打包，建立 `v<版本>` 標籤與 Release 並附上 `cn-speedtest.zip`；版本號沒變的合併不會發布。也可以手動推送 `v*` 標籤，或在 Actions 頁面手動執行 release。
 
 ## 致謝與授權注意
 
