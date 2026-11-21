@@ -366,7 +366,7 @@ function createBot(getConfig, mgr) {
       await edit(chatId, statusMsg.message_id,
         "⏳ <b>" + fmt.typeLabel(job.type) + "</b>（" + fmt.familyLabel(job.family) + "｜" + fmt.ispsLabel(job.isps) + "）執行中：" + fmt.esc(job.clients.map(function (u) { return job.names[u]; }).join("、")) +
         (job.type !== "ping" ? "\n📍 " + fmt.esc(fmt.pointsLabel(job.points)) + "｜" + fmt.modeLabel(job.mode) : "") +
-        "\n預估約 " + Math.ceil(job.estimateSec / 60) + " 分鐘，完成後會自動回傳結果。" + extra);
+        "\n預估約 " + Math.ceil(job.estimateSec / 60) + " 分鐘，完成後會自動回傳結果。" + extra, cancelMarkup(job.id));
     } catch (e) {
       await edit(chatId, statusMsg.message_id, "❌ 無法開始測試：" + fmt.esc(errText(e)));
     }
@@ -425,15 +425,28 @@ function createBot(getConfig, mgr) {
   }
 
   // 任務結束 → 更新「執行中」那則狀態訊息
+  function cancelMarkup(jobId) {
+    return { inline_keyboard: [[{ text: "❌ 取消測試", callback_data: "x:" + jobId }]] };
+  }
+
+  // 任務設定摘要：協議｜運營商｜測速點｜模式
+  function settingsLabel(job) {
+    var t = fmt.familyLabel(job.family) + "｜" + fmt.ispsLabel(job.isps);
+    if (job.type !== "ping") t += "｜" + fmt.pointsLabel(job.points) + "｜" + fmt.modeLabel(job.mode);
+    return t;
+  }
+
   async function onJobDone(job) {
     if (stopped || !cfg().tgEnabled) return;
     if (job.origin && job.origin.kind === "tg") {
       var ok = job.clients.filter(function (u) { return job.results[u] && job.results[u].ok; }).length;
       var icon = job.status === "done" ? "✅" : job.status === "cancelled" ? "🛑" : "⚠️";
       var took = Math.round((Date.parse(job.finishedAt) - Date.parse(job.startedAt)) / 1000);
+      var head = icon + " <b>" + fmt.typeLabel(job.type) + "</b>（" + fmt.esc(settingsLabel(job)) + "）";
       try {
         await edit(job.origin.chatId, job.origin.messageId,
-          icon + " <b>" + fmt.typeLabel(job.type) + "</b>（" + fmt.familyLabel(job.family) + "）完成：成功 " + ok + " / " + job.clients.length + " 台，耗時 " + took + " 秒" +
+          (job.status === "cancelled" ? head + "已取消，耗時 " + took + " 秒"
+            : head + "完成：成功 " + ok + " / " + job.clients.length + " 台，耗時 " + took + " 秒") +
           (job.error ? "\n" + fmt.esc(job.error) : ""));
       } catch (e) { /* ignore */ }
     }
@@ -614,6 +627,26 @@ function createBot(getConfig, mgr) {
         case "l": {
           await api("answerCallbackQuery", { callback_query_id: q.id });
           await send(chatId, await lastResultText(parts.slice(1).join(":")));
+          return;
+        }
+        case "x": case "xy": case "xn": {
+          var cj = mgr.getJob(parts[1]);
+          if (!cj || cj.status !== "running") {
+            await api("answerCallbackQuery", { callback_query_id: q.id, text: "這個任務已經結束" });
+            try { await api("editMessageReplyMarkup", { chat_id: chatId, message_id: msg.message_id, reply_markup: { inline_keyboard: [] } }); } catch (e) { /* ignore */ }
+            return;
+          }
+          if (parts[0] === "x") {
+            await api("answerCallbackQuery", { callback_query_id: q.id });
+            await api("editMessageReplyMarkup", { chat_id: chatId, message_id: msg.message_id, reply_markup: { inline_keyboard: [[
+              { text: "✅ 確定取消", callback_data: "xy:" + cj.id }, { text: "↩️ 繼續測試", callback_data: "xn:" + cj.id }]] } });
+          } else if (parts[0] === "xn") {
+            await api("answerCallbackQuery", { callback_query_id: q.id, text: "繼續測試" });
+            await api("editMessageReplyMarkup", { chat_id: chatId, message_id: msg.message_id, reply_markup: cancelMarkup(cj.id) });
+          } else {
+            mgr.cancel(cj.id);
+            await api("answerCallbackQuery", { callback_query_id: q.id, text: "已取消，正在停止節點上的測試" });
+          }
           return;
         }
         case "rr": {

@@ -327,6 +327,8 @@ function deliver(job, uuid, result) {
   job.delivered = job.delivered || {};
   if (job.delivered[uuid]) return;
   job.delivered[uuid] = true;
+  // 取消的任務：沒有結果的節點不產生圖片、不傳訊息（狀態訊息會改成「已取消」）
+  if (job.status === "cancelled" && (!result || !result.ok)) return;
   var p = (async function () {
     var img = null;
     if (imaging && result && (result.ok || (result.errors && result.errors.length))) {

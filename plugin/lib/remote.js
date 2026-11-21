@@ -249,6 +249,7 @@ function buildRemoteCommand(opts) {
     "fi",
     "trap 'rm -rf \"$WORK\"; rmdir \"$LOCK\" 2>/dev/null' EXIT",
     "trap 'exit 130' INT TERM",
+    'echo $$ > "$WORK/pid"',
     'command -v curl >/dev/null 2>&1 || { echo "@@ERR|nocurl|節點缺少 curl，請先安裝 curl"; exit 2; }',
     'TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout"',
     'echo "@@BEGIN|2|$(uname -s)|$(uname -m)"',
@@ -380,7 +381,22 @@ function buildRemoteCommand(opts) {
   return L.join("\n");
 }
 
+// 取消：停止節點上該次測試的腳本與它啟動的所有程序（泰爾測速、curl…），腳本結束時會自行清掉暫存與鎖
+function buildCancelCommand(runId) {
+  validateRunId(runId);
+  return [
+    'D="${TMPDIR:-/tmp}/kcst-' + runId + '"',
+    '[ -f "$D/pid" ] || { echo "not running"; exit 0; }',
+    'P=$(cat "$D/pid")',
+    'kids() { if command -v pgrep >/dev/null 2>&1; then pgrep -P "$1"; else ps -o pid= --ppid "$1" 2>/dev/null; fi; }',
+    'kt() { for c in $(kids "$1"); do kt "$c"; done; kill -TERM "$1" 2>/dev/null; }',
+    'kt "$P"',
+    'echo cancelled'
+  ].join("\n");
+}
+
 module.exports = {
+  buildCancelCommand: buildCancelCommand,
   DEFAULT_GETNODES_URL: DEFAULT_GETNODES_URL,
   DEFAULT_TAIER_URL: DEFAULT_TAIER_URL,
   PROVINCES: PROVINCES,
