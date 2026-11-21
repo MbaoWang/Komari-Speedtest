@@ -200,8 +200,8 @@ function createBot(getConfig, mgr) {
       "選擇測試項目 👇";
     var t = target;
     var rows = [
-      [{ text: "📶 延遲 IPv4", callback_data: "r:p4:" + t }, { text: "📶 延遲 IPv6", callback_data: "r:p6:" + t }, { text: "📶 延遲 雙棧", callback_data: "r:pb:" + t }],
       [{ text: "🚀 測速 IPv4", callback_data: "r:s4:" + t }, { text: "🚀 測速 IPv6", callback_data: "r:s6:" + t }, { text: "🚀 測速 雙棧", callback_data: "r:sb:" + t }],
+      [{ text: "📶 延遲 IPv4", callback_data: "r:p4:" + t }, { text: "📶 延遲 IPv6", callback_data: "r:p6:" + t }, { text: "📶 延遲 雙棧", callback_data: "r:pb:" + t }],
       [{ text: "🧪 完整 IPv4", callback_data: "r:f4:" + t }, { text: "🧪 完整 IPv6", callback_data: "r:f6:" + t }, { text: "🧪 完整 雙棧", callback_data: "r:fb:" + t }],
       [{ text: "📍 選擇測速點", callback_data: "pt:" + t }, { text: "⚙️ 模式：" + fmt.modeLabel(s.mode), callback_data: "mc:" + t }],
       [{ text: "📡 運營商：" + fmt.ispsLabel(s.isps), callback_data: "ic:" + t }]
@@ -263,8 +263,8 @@ function createBot(getConfig, mgr) {
       "<b>互動選單</b>：/menu → 選節點 → 選測試項目",
       "",
       "<b>指令 / 關鍵字</b>（可不加斜線）：",
-      "<code>/ping 節點 [v4|v6|雙棧] [電信|聯通|移動]</code>  延遲 / 丟包",
       "<code>/speed 節點 [v4|v6|雙棧] [測速點] [單|多|單多]</code>  泰爾測速",
+      "<code>/ping 節點 [v4|v6|雙棧] [電信|聯通|移動]</code>  延遲 / 丟包",
       "<code>/full 節點 [v4|v6|雙棧] [測速點]</code>  延遲 + 測速",
       "<code>/last 節點</code>  上次結果",
       "<code>/nodes</code>  節點列表（可用編號代替名稱）",
@@ -618,8 +618,8 @@ function createBot(getConfig, mgr) {
       await api("setMyCommands", {
         commands: [
           { command: "menu", description: "互動式選單" },
-          { command: "ping", description: "三網延遲：/ping 節點 [v4|v6|雙棧]" },
           { command: "speed", description: "泰爾測速：/speed 節點 [v4|v6] [測速點]" },
+          { command: "ping", description: "三網延遲：/ping 節點 [v4|v6|雙棧]" },
           { command: "full", description: "延遲 + 測速：/full 節點" },
           { command: "nodes", description: "節點列表" },
           { command: "last", description: "上次結果：/last 節點" },
