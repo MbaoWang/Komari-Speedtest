@@ -78,37 +78,38 @@ Canvas.prototype.rect = function (x, y, w, h, c) {
   for (var yy = y; yy < y2; yy++) this.px.fill(ci, yy * this.w + x, yy * this.w + x2);
 };
 Canvas.prototype.conv = function (s) { s = String(s); return this.cn ? zh.toCN(s) : s; };
-Canvas.prototype.textWidth = function (s) {
+Canvas.prototype.textWidth = function (s, bold) {
   var f = font(), w = 0;
   s = this.conv(s);
   for (var i = 0; i < s.length; i++) {
     var gi = f.index[s.charAt(i)];
     var code = s.charCodeAt(i);
     if (gi === undefined && ((code >= 0xd800 && code <= 0xdfff) || (code >= 0xfe00 && code <= 0xfe0f) || code === 0x200d)) continue;
-    w += gi === undefined ? (code > 0x2e80 ? 17 : 9) : f.widths[gi];
+    w += gi === undefined ? (code > 0x2e80 ? 17 : 9) : f.widths[gi] + (bold ? 1 : 0);
   }
   return w;
 };
-Canvas.prototype.fit = function (s, maxW) {
+Canvas.prototype.fit = function (s, maxW, bold) {
   s = this.conv(s);
-  if (this.textWidth(s) <= maxW) return s;
-  while (s.length > 1 && this.textWidth(s + "…") > maxW) s = s.slice(0, -1);
+  if (this.textWidth(s, bold) <= maxW) return s;
+  while (s.length > 1 && this.textWidth(s + "…", bold) > maxW) s = s.slice(0, -1);
   return s + "…";
 };
 // 以背景色 bg 與文字色 fg 的 4 階混色畫字；bold = 水平重疊 1px
 Canvas.prototype.text = function (x, y, s, fg, bg, opts) {
   opts = opts || {};
   var f = font();
+  var bold = Boolean(opts.bold);
   s = this.conv(s);
-  if (opts.maxW) s = this.fit(s, opts.maxW);
-  var w = this.textWidth(s);
+  if (opts.maxW) s = this.fit(s, opts.maxW, bold);
+  var w = this.textWidth(s, bold);
   if (opts.align === "right") x -= w;
   else if (opts.align === "center") x -= w / 2;
   x = Math.round(x); y = Math.round(y);
   var F = hex(fg), B = hex(bg);
   var shades = [null];
   for (var a = 1; a <= 3; a++) shades.push(this.color([Math.round(B[0] + (F[0] - B[0]) * a / 3), Math.round(B[1] + (F[1] - B[1]) * a / 3), Math.round(B[2] + (F[2] - B[2]) * a / 3)]));
-  var levelAt = {};
+  var levelAt = bold ? {} : null;
   for (var i = 0; i < s.length; i++) {
     var ch = s.charAt(i);
     var gi = f.index[ch];
@@ -124,24 +125,28 @@ Canvas.prototype.text = function (x, y, s, fg, bg, opts) {
     for (var gy = 0; gy < f.h; gy++) {
       var py = y + gy;
       if (py < 0 || py >= this.h) continue;
+      var rowOff = py * this.w;
       for (var gx = 0; gx < gw2; gx++) {
         var bitIndex = gy * gw2 + gx;
         var byte = f.data[base + (bitIndex >> 2)];
         var level = (byte >> (6 - 2 * (bitIndex & 3))) & 3;
         if (!level) continue;
-        var reps = opts.bold ? 2 : 1;
-        for (var r = 0; r < reps; r++) {
+        if (!bold) {
+          var px0 = x + gx;
+          if (px0 >= 0 && px0 < this.w) this.px[rowOff + px0] = shades[level];
+          continue;
+        }
+        for (var r = 0; r < 2; r++) {
           var px = x + gx + r;
           if (px < 0 || px >= this.w) continue;
-          var idx = py * this.w + px;
-          var key = idx;
-          if (opts.bold && levelAt[key] !== undefined && levelAt[key] >= level) continue;
-          levelAt[key] = level;
+          var idx = rowOff + px;
+          if (levelAt[idx] !== undefined && levelAt[idx] >= level) continue;
+          levelAt[idx] = level;
           this.px[idx] = shades[level];
         }
       }
     }
-    x += gw2 + (opts.bold ? 1 : 0);
+    x += gw2 + (bold ? 1 : 0);
   }
   return w;
 };
@@ -170,7 +175,7 @@ function latencyBlocks(latency, tag) {
       var col = parser.ispOrder(r.isp);
       if (col > 2) { others.push(r); return; }
       if (!map[r.prov]) { map[r.prov] = [null, null, null]; provs.push(r.prov); }
-      map[r.prov][col] = r;
+      if (!map[r.prov][col] || (r.avg !== null && (map[r.prov][col].avg === null || r.avg < map[r.prov][col].avg))) map[r.prov][col] = r;
     });
     var lines = provs.map(function (p) { return { label: fmt.tProv(p), cells: map[p] }; });
     others.forEach(function (r) { lines.push({ label: fmt.tProv(r.prov) + fmt.tIsp(r.isp), cells: [r, null, null] }); });
@@ -193,6 +198,7 @@ function renderResult(job, nodeName, r, opts) {
   var h = 96 + 40;
   // 註解太長時換行
   var measure = new Canvas(W, 1, C.bg);
+  measure.cn = opts.lang === "zh_CN";
   lat.forEach(function (b) {
     b.noteLines = [];
     if (!b.note) return;
@@ -218,8 +224,8 @@ function renderResult(job, nodeName, r, opts) {
   cv.cn = opts.lang === "zh_CN";
   // 標題列
   cv.rect(0, 0, W, 96, C.head);
-  cv.text(PAD, 16, cv.fit(fmt.typeLabel(job.type) + "｜" + nodeName, W - 2 * PAD), C.headText, C.head, { bold: true });
-  var meta = fmt.familyLabel(job.family) + "　" + fmt.ispsLabel(job.isps) + (job.type !== "ping" ? "　測速點 " + fmt.pointsLabel(job.points) + "　" + fmt.modeLabel(job.mode) : "") + "　" + fmt.fmtTime(job.finishedAt || new Date().toISOString());
+  cv.text(PAD, 16, cv.fit(fmt.typeLabel(job.type) + "｜" + nodeName, W - 2 * PAD, true), C.headText, C.head, { bold: true });
+  var meta = fmt.familyLabel(job.family) + "　" + fmt.ispsLabel(job.isps) + (job.type !== "ping" ? "　測速點 " + fmt.pointsLabel(job.points) + "　" + fmt.modeLabel(job.mode) : "") + "　" + fmt.fmtTime((r && r.finishedAt) || job.finishedAt || new Date().toISOString());
   cv.text(PAD, 54, meta, C.headSub, C.head, { maxW: W - 2 * PAD });
   var y = 96 + 12;
   var info = [];
@@ -290,7 +296,7 @@ function renderResult(job, nodeName, r, opts) {
         var v = s[c.k], txt, col;
         if (c.k === "rtt") { txt = v === null ? "-" : fmt.fmtMs(v) + " ms"; col = latColor(v); }
         else if (c.k === "rttLarge") {
-          if (v === null || v === undefined) { txt = s.lossLarge === 100 ? "不通" : "-"; col = C.bad; }
+          if (v === null || v === undefined) { txt = s.lossLarge === 100 ? "不通" : "-"; col = s.lossLarge === 100 ? C.bad : C.none; }
           else { txt = fmt.fmtMs(v) + (s.lossLarge > 0 ? "/" + Math.round(s.lossLarge) + "%" : " ms"); col = s.lossLarge > 0 ? lossColor(s.lossLarge) : latColor(v); }
         }
         else if (c.k === "upRetrans") { txt = pctText(v) + (s.rtxSource === "snmp" ? "≈" : ""); col = pctColor(v); }

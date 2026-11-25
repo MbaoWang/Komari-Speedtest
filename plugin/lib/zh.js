@@ -68,8 +68,9 @@
   }
   function conv(node) {
     if (node.nodeType === 3) { var v = node.nodeValue, n = toCN(v); if (n !== v) node.nodeValue = n; return; }
-    if (node.nodeType !== 1 || /^(SCRIPT|STYLE|TEXTAREA|INPUT)$/.test(node.tagName)) return;
+    if (node.nodeType !== 1 || /^(SCRIPT|STYLE)$/.test(node.tagName)) return;
     convAttrs(node);
+    if (/^(TEXTAREA|INPUT)$/.test(node.tagName)) return;
     for (var c = node.firstChild; c; c = c.nextSibling) conv(c);
   }
   function start() {

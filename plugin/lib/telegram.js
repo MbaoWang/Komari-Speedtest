@@ -71,7 +71,35 @@ function createBot(getConfig, mgr) {
   } catch (e) { /* 首次執行 */ }
 
   function saveState() {
-    try { fs.writeFileSync(tgStatePath(), JSON.stringify({ offset: offset, sessions: sessions })); } catch (e) { /* ignore */ }
+    try {
+      var p = tgStatePath();
+      fs.writeFileSync(p + ".tmp", JSON.stringify({ offset: offset, sessions: sessions }));
+      fs.renameSync(p + ".tmp", p);
+    } catch (e) { /* ignore */ }
+  }
+
+  function fetchWithTimeout(url, init, timeoutMs, externalSignal) {
+    if (typeof AbortController === "undefined") {
+      if (externalSignal) init.signal = externalSignal;
+      return fetch(url, init);
+    }
+    var ac = new AbortController();
+    var onAbort = function () { try { ac.abort(); } catch (e) { /* ignore */ } };
+    if (externalSignal) {
+      if (externalSignal.aborted) ac.abort();
+      else externalSignal.addEventListener("abort", onAbort, { once: true });
+    }
+    init.signal = ac.signal;
+    var timer = setTimeout(onAbort, timeoutMs);
+    return fetch(url, init).then(function (r) {
+      clearTimeout(timer);
+      if (externalSignal) externalSignal.removeEventListener("abort", onAbort);
+      return r;
+    }, function (e) {
+      clearTimeout(timer);
+      if (externalSignal) externalSignal.removeEventListener("abort", onAbort);
+      throw e;
+    });
   }
 
   function cfg() { return getConfig(); }
@@ -104,8 +132,8 @@ function createBot(getConfig, mgr) {
     if (params && method !== "getUpdates") params = localize(params, params.chat_id !== undefined ? langFor(params.chat_id) : curLang);
     var url = c.tgApiBase.replace(/\/+$/, "") + "/bot" + c.tgToken + "/" + method;
     var init = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params || {}) };
-    if (signal) init.signal = signal;
-    var res = await fetch(url, init);
+    var timeoutMs = method === "getUpdates" ? 35000 : 20000;
+    var res = await fetchWithTimeout(url, init, timeoutMs, signal);
     var text = await res.text();
     var data;
     try { data = JSON.parse(text); } catch (e) { throw new Error("Telegram 回應無法解析（HTTP " + res.status + "）"); }
@@ -119,7 +147,7 @@ function createBot(getConfig, mgr) {
 
   async function apiForm(method, form) {
     var c = cfg();
-    var res = await fetch(c.tgApiBase.replace(/\/+$/, "") + "/bot" + c.tgToken + "/" + method, { method: "POST", body: form });
+    var res = await fetchWithTimeout(c.tgApiBase.replace(/\/+$/, "") + "/bot" + c.tgToken + "/" + method, { method: "POST", body: form }, 30000);
     var text = await res.text();
     var data;
     try { data = JSON.parse(text); } catch (e) { throw new Error("Telegram 回應無法解析（HTTP " + res.status + "）"); }
@@ -155,7 +183,7 @@ function createBot(getConfig, mgr) {
   }
 
   async function edit(chatId, messageId, html, markup) {
-    var p = { chat_id: chatId, message_id: messageId, text: html.length > 4096 ? html.slice(0, 4000) + "…" : html, parse_mode: "HTML", disable_web_page_preview: true };
+    var p = { chat_id: chatId, message_id: messageId, text: fmt.truncateHTML(html, 4096), parse_mode: "HTML", disable_web_page_preview: true };
     if (markup) p.reply_markup = markup;
     try { return await api("editMessageText", p); }
     catch (e) { if (!/not modified/i.test(errText(e))) throw e; return null; }
@@ -377,7 +405,12 @@ function createBot(getConfig, mgr) {
     var t = job.type === "ping" ? "p" : job.type === "speed" ? "s" : "f";
     var target = job.clients.length > 1 ? "all" : uuid;
     // 「再測一次」照原任務的設定重跑（rr:任務ID）；原任務紀錄被刪掉時退回 r:（用聊天目前的設定）
-    return { inline_keyboard: [[{ text: "🔁 再測一次", callback_data: "rr:" + job.id + ":" + t + f + ":" + target }, { text: "📋 節點選單", callback_data: "n:" + uuid }]] };
+    // Telegram callback_data 上限 64 位元組，超過時省略退回欄位只保留任務 ID
+    var rr = "rr:" + job.id + ":" + t + f + ":" + target;
+    if (rr.length > 64) rr = "rr:" + job.id;
+    var row = [{ text: "🔁 再測一次", callback_data: rr }];
+    if (("n:" + uuid).length <= 64) row.push({ text: "📋 節點選單", callback_data: "n:" + uuid });
+    return { inline_keyboard: [row] };
   }
 
   async function sendPhoto(chatId, png, caption, extra) {
@@ -386,7 +419,7 @@ function createBot(getConfig, mgr) {
     if (extra && extra.reply_markup) { var ex = {}; for (var kx in extra) ex[kx] = extra[kx]; ex.reply_markup = loc.reply_markup; extra = ex; }
     var form = new FormData();
     form.append("chat_id", String(chatId));
-    form.append("caption", caption.length > 1024 ? caption.slice(0, 1000) + "…" : caption);
+    form.append("caption", fmt.truncateHTML(caption, 1024));
     form.append("parse_mode", "HTML");
     if (extra) for (var k in extra) form.append(k, typeof extra[k] === "object" ? JSON.stringify(extra[k]) : String(extra[k]));
     form.append("photo", new Blob([png], { type: "image/png" }), "cn-speedtest.png");
@@ -483,17 +516,26 @@ function createBot(getConfig, mgr) {
     var first = tokens.shift().replace(/@\S+$/, "");
     var cmd = lookupCmd(first);
     if (!cmd) return slash ? { cmd: "unknown" } : null;
-    var family = null, mode = null, pointsArr = [], nodeTokens = [], ispArr = [];
+    var allowPoints = cmd === "speed" || cmd === "full";
+    var family = null, mode = null, pointGroups = [], nodeTokens = [], ispArr = [];
     tokens.forEach(function (tok) {
       var low = tok.toLowerCase();
       if (nodeTokens.length && FAMILY_KW[low] && family === null) { family = FAMILY_KW[low]; return; }
       if (!nodeTokens.length && FAMILY_KW[low] && !/^\d+$/.test(low)) { family = FAMILY_KW[low]; return; }
       if (ISP_KW[low] || (nodeTokens.length && ISP_CODE[low])) { ispArr.push(ISP_KW[low] || ISP_CODE[low]); return; }
       if (MODE_KW[low] && mode === null && (nodeTokens.length || low.length > 1)) { mode = MODE_KW[low]; return; }
-      var pts = tok.split(/[,，、]/).filter(Boolean);
-      if (pts.length && pts.every(isPointToken)) { pointsArr = pointsArr.concat(pts); return; }
+      if (allowPoints) {
+        var pts = tok.split(/[,，、]/).filter(Boolean);
+        if (pts.length && pts.every(isPointToken)) { pointGroups.push({ raw: tok, pts: pts }); return; }
+      }
       nodeTokens.push(tok);
     });
+    // 沒有其他節點名稱但有單一地名詞（例如「測速 香港」或「測速 香港 上海,广东」）：將第一個視為節點名
+    if (allowPoints && !nodeTokens.length && pointGroups.length && pointGroups[0].pts.length === 1) {
+      nodeTokens.push(pointGroups.shift().raw);
+    }
+    var pointsArr = [];
+    pointGroups.forEach(function (g) { pointsArr = pointsArr.concat(g.pts); });
     return { cmd: cmd, family: family, mode: mode, points: pointsArr.length ? pointsArr.join(",") : null, isps: ispArr.length ? remote.normIsps(ispArr) : null, nodeTokens: nodeTokens };
   }
 
@@ -513,8 +555,9 @@ function createBot(getConfig, mgr) {
     var l = mgr.latest(target);
     var name = mgr.nodeName(target);
     if (!l) return "📄 " + fmt.esc(name) + " 還沒有測試紀錄。";
-    if (l.ping) html.push(fmt.nodeResultHTML({ type: "ping", family: l.ping.family }, name, { latency: l.ping.latency, speed: [], errors: [], warnings: [], ip4: l.ping.ip4, ip6: l.ping.ip6 }, { showIp: cfg().tgShowFullIp }) + "\n<i>" + fmt.esc(fmt.fmtTime(l.ping.at)) + "</i>");
-    if (l.speed) html.push(fmt.nodeResultHTML({ type: "speed", family: l.speed.family, points: l.speed.points, mode: l.speed.mode }, name, { latency: [], speed: l.speed.speed, errors: [], warnings: [], exit: l.speed.exit }, {}) + "\n<i>" + fmt.esc(fmt.fmtTime(l.speed.at)) + "</i>");
+    if (l.ping) html.push(fmt.nodeResultHTML({ type: "ping", family: l.ping.family }, name, { latency: l.ping.latency || [], latencyLarge: l.ping.latencyLarge || [], largeSize: l.ping.largeSize || null, speed: [], errors: [], warnings: [], ip4: l.ping.ip4, ip6: l.ping.ip6 }, { showIp: cfg().tgShowFullIp }) + "\n<i>" + fmt.esc(fmt.fmtTime(l.ping.at)) + "</i>");
+    if (l.speed) html.push(fmt.nodeResultHTML({ type: "speed", family: l.speed.family, points: l.speed.points, mode: l.speed.mode }, name, { latency: [], speed: l.speed.speed || [], errors: [], warnings: [], exit: l.speed.exit }, {}) + "\n<i>" + fmt.esc(fmt.fmtTime(l.speed.at)) + "</i>");
+    if (!html.length) return "📄 " + fmt.esc(name) + " 還沒有測試紀錄。";
     return html.join("\n\n");
   }
 
@@ -551,7 +594,7 @@ function createBot(getConfig, mgr) {
         }
         var r = await resolveNode(parsed.nodeTokens);
         if (r.error) return send(chatId, "⚠️ " + fmt.esc(r.error));
-        var family = parsed.family || cfg().defaultFamily;
+        var family = parsed.family || s.family || cfg().defaultFamily;
         var points = parsed.points !== null ? parsed.points : s.points;
         var mode = parsed.mode || s.mode;
         var isps = parsed.isps !== null ? parsed.isps : s.isps;
@@ -654,6 +697,10 @@ function createBot(getConfig, mgr) {
           if (prev) {
             await api("answerCallbackQuery", { callback_query_id: q.id, text: "照上次設定重測：" + fmt.typeLabel(prev.type) });
             await startJob(chatId, null, prev.type, prev.family, prev.clients.length > 1 ? prev.clients : prev.clients[0], prev.points, prev.mode, prev.isps || []);
+            return;
+          }
+          if (parts.length < 4) {
+            await api("answerCallbackQuery", { callback_query_id: q.id, text: "原任務紀錄已刪除，請從 /menu 重新測試" });
             return;
           }
           // 找不到原任務（紀錄已刪除）：改用聊天目前的設定
@@ -775,7 +822,7 @@ function createBot(getConfig, mgr) {
     return { bot: info.username, chat: target };
   }
 
-  return { start: start, stop: stop, deliverNodeResult: deliverNodeResult, onJobDone: onJobDone, sendTest: sendTest, parseText: parseText, isRunning: function () { return running; } };
+  return { start: start, stop: stop, deliverNodeResult: deliverNodeResult, onJobDone: onJobDone, sendTest: sendTest, parseText: parseText, resultMarkup: resultMarkup, lastResultText: lastResultText, isRunning: function () { return running; } };
 }
 
 module.exports = { createBot: createBot, isPointToken: isPointToken };

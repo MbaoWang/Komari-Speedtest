@@ -192,7 +192,7 @@ function probeScript(count) {
     '  t=$(curl -"$fam" --noproxy "*" -s -o /dev/null -I --connect-timeout 3 -m 3 -w "%{time_connect}" "$u" 2>/dev/null)',
     '  [ -n "$t" ] || t=0',
     '  out="$out $t"',
-    '  case "$t" in 0|0.000000) fails=$((fails+1)) ;; esac',
+    '  case "$t" in *[1-9]*) ;; *) fails=$((fails+1)) ;; esac',
     "  i=$((i+1))",
     '  if [ "$i" -ge 3 ] && [ "$fails" -ge "$i" ]; then break; fi',
     "  sleep 0.2 2>/dev/null || true",
@@ -280,9 +280,14 @@ function buildRemoteCommand(opts) {
     'LOCK="$T/kcst.lock"',
     'mkdir "$WORK" 2>/dev/null || { echo "@@ERR|workdir|無法建立暫存目錄"; exit 1; }',
     'if ! mkdir "$LOCK" 2>/dev/null; then',
-    '  if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +' + Math.ceil(est / 60 + 10) + ' 2>/dev/null)" ]; then rm -rf "$LOCK"; mkdir "$LOCK" 2>/dev/null; else echo "@@ERR|busy|此節點已有測速任務在執行，請稍後再試"; rm -rf "$WORK"; exit 75; fi',
+    '  lp=$(cat "$LOCK/pid" 2>/dev/null | tr -cd "0-9")',
+    '  if { [ -n "$lp" ] && ! kill -0 "$lp" 2>/dev/null; } || [ -n "$(find "$LOCK" -maxdepth 0 -mmin +' + Math.ceil(est / 60 + 10) + ' 2>/dev/null)" ]; then',
+    '    rm -rf "$LOCK"',
+    '    mkdir "$LOCK" 2>/dev/null || { echo "@@ERR|busy|此節點已有測速任務在執行，請稍後再試"; rm -rf "$WORK"; exit 75; }',
+    '  else echo "@@ERR|busy|此節點已有測速任務在執行，請稍後再試"; rm -rf "$WORK"; exit 75; fi',
     "fi",
-    "trap 'rm -rf \"$WORK\"; rmdir \"$LOCK\" 2>/dev/null' EXIT",
+    'echo $$ > "$LOCK/pid"',
+    "trap 'rm -rf \"$WORK\"; [ \"$(cat \"$LOCK/pid\" 2>/dev/null)\" = \"$$\" ] && rm -rf \"$LOCK\"' EXIT",
     "trap 'exit 130' INT TERM",
     'echo $$ > "$WORK/pid"',
     'command -v curl >/dev/null 2>&1 || { echo "@@ERR|nocurl|節點缺少 curl，請先安裝 curl"; exit 2; }',
@@ -291,10 +296,12 @@ function buildRemoteCommand(opts) {
     // 網卡收發位元組（rx|tx），排除 lo 與 docker / veth 等虛擬網卡，避免重複計算
     "netdev() { awk 'NR > 2 { sub(/^ +/, \"\"); i = index($0, \":\"); n = substr($0, 1, i - 1); if (n == \"lo\" || n ~ /^(veth|docker|br-|virbr|cni|flannel|cali|ifb)/) next; split(substr($0, i + 1), f, \" \"); rx += f[1]; tx += f[9] } END { printf \"%.0f|%.0f\", rx, tx }' /proc/net/dev 2>/dev/null; }",
     'NT0=$(netdev)',
-    'ip4=$(curl -4 -fsS -m 6 https://4.ipw.cn 2>/dev/null || curl -4 -fsS -m 6 https://api.ipify.org 2>/dev/null); ip4=$(printf "%s" "$ip4" | tr -cd "0-9.")',
-    'ip6=$(curl -6 -fsS -m 6 https://6.ipw.cn 2>/dev/null || curl -6 -fsS -m 6 https://api6.ipify.org 2>/dev/null); ip6=$(printf "%s" "$ip6" | tr -cd "0-9a-fA-F:")',
-    'echo "@@IP|4|$ip4"',
-    'echo "@@IP|6|$ip6"'
+    // 依所選協議並行查詢出口 IP，避免單棧模式或黑洞協議白等逾時
+    (family !== "6" ? '( ip4=$(curl -4 -fsS -m 5 https://4.ipw.cn 2>/dev/null || curl -4 -fsS -m 5 https://api.ipify.org 2>/dev/null); printf "%s" "$ip4" | tr -cd "0-9." > "$WORK/ip4" ) &' : ': > "$WORK/ip4"'),
+    (family !== "4" ? '( ip6=$(curl -6 -fsS -m 5 https://6.ipw.cn 2>/dev/null || curl -6 -fsS -m 5 https://api6.ipify.org 2>/dev/null); printf "%s" "$ip6" | tr -cd "0-9a-fA-F:" > "$WORK/ip6" ) &' : ': > "$WORK/ip6"'),
+    "wait",
+    'echo "@@IP|4|$(cat "$WORK/ip4" 2>/dev/null)"',
+    'echo "@@IP|6|$(cat "$WORK/ip6" 2>/dev/null)"'
   );
 
   if (large) {
@@ -320,6 +327,7 @@ function buildRemoteCommand(opts) {
       'M4=$(mtu_of 4); M6=$(mtu_of 6)',
       'if [ -n "$M4" ] && [ "$M4" -lt "$LSIZE4" ] 2>/dev/null; then LSIZE4=$M4; fi',
       'if [ -n "$M6" ] && [ "$M6" -lt "$LSIZE6" ] 2>/dev/null; then LSIZE6=$M6; fi',
+      'LSIZE6_ORIG=$LSIZE6',
       'echo "@@LSIZE|$LSIZE4|$LSIZE6|' + largeSize + '"',
       "export LSIZE4 LSIZE6",
       "cat > \"$WORK/large.sh\" <<'KCST_LARGE'",
@@ -359,7 +367,7 @@ function buildRemoteCommand(opts) {
       '      if [ "$pf" = 6 ] && [ "$LSIZE6" -gt 1280 ]; then',
       "        LSIZE6=1280; export LSIZE6",
       '        PB=$(sh "$WORK/large.sh" 6 pre pre pre "$PIP" 443 3 | awk -F"|" "{print \\$7}")',
-      '        if [ "${PB:-0}" -gt 0 ]; then echo "@@WARN|large|IPv6 大包在 ' + largeSize + ' B 不通、1280 B 正常（路徑 MTU 較小），已改用 1280 B"; fi',
+      '        if [ "${PB:-0}" -gt 0 ]; then echo "@@WARN|large|IPv6 大包在 $LSIZE6_ORIG B 不通、1280 B 正常（路徑 MTU 較小），已改用 1280 B"; else LSIZE6=$LSIZE6_ORIG; export LSIZE6; fi',
       "      fi",
       '      if [ "${PB:-0}" -eq 0 ]; then echo "@@WARN|large|IPv$pf 大包被本機或上游防火牆擋下（小包正常、大包全掉），已略過 IPv$pf 大包測試"; echo "$pf" >> "$WORK/large.skip"; fi',
       "    fi",
@@ -382,8 +390,8 @@ function buildRemoteCommand(opts) {
     '    runlarge "$WORK/targets.l6" > "$WORK/latl6.out"',
     "    if awk -F'|' '$7>0 {f=1} END{exit !f}' \"$WORK/latl6.out\"; then",
     "      grep -v '^@@LATL|6|' \"$WORK/latl.out\" > \"$WORK/latl.tmp\"; cat \"$WORK/latl6.out\" >> \"$WORK/latl.tmp\"; mv \"$WORK/latl.tmp\" \"$WORK/latl.out\"",
-    '      echo "@@WARN|large|IPv6 大包在 ' + largeSize + ' B 全部不通、1280 B 可以通（路徑 MTU 小於 ' + largeSize + '），已改用 1280 B"',
-    "    else LSIZE6=" + largeSize + "; export LSIZE6; fi",
+    '      echo "@@WARN|large|IPv6 大包在 $LSIZE6_ORIG B 全部不通、1280 B 可以通（路徑 MTU 小於 $LSIZE6_ORIG），已改用 1280 B"',
+    "    else LSIZE6=$LSIZE6_ORIG; export LSIZE6; fi",
     "  fi",
     '  echo "@@LSIZE|$LSIZE4|$LSIZE6|' + largeSize + '"',
     '  echo "@@LATL_BEGIN"',
@@ -393,37 +401,62 @@ function buildRemoteCommand(opts) {
   ];
 
   if (opts.ping) {
+    var zProvs = ZSTATIC_PROVINCES;
+    if (provFilter) {
+      var pfParts = provFilter.split(",").filter(Boolean);
+      var filteredZ = zProvs.filter(function (x) { return pfParts.some(function (p) { return x[1].indexOf(p) >= 0 || p.indexOf(x[1]) >= 0; }); });
+      if (filteredZ.length) zProvs = filteredZ;
+    }
+    var zIsps = [["ct", "电信"], ["cu", "联通"], ["cm", "移动"]];
+    if (isps.length) zIsps = zIsps.filter(function (x) { return isps.indexOf(x[1]) >= 0; });
+    var gnScopes = "cdn" + (family === "4" ? " v4" : family === "6" ? " v6" : " v4 v6");
     L.push(
       "# ---------- 延遲 / 丟包（TCP 握手，參考 TcpQuality 節點） ----------",
       "PAR=" + parallel,
       'GN=' + shQuote(getNodesUrl),
       'case "$GN" in *\\?*) GS="&" ;; *) GS="?" ;; esac',
       ': > "$WORK/nodes.tsv"',
-      // 預設清單（scope=cdn）之外，再抓該協議專用的清單（scope=v4 / v6，TcpQuality 用 -v4 / -v6 時用的），合併去重
-      // 每份清單：失敗（非 200 或沒有節點）時改用 IPv4 連線再試，仍失敗則等 3 秒重試一次；結果數量回報為 @@GN
-      "getnodes() { c=$(curl -sS --connect-timeout 6 -m 30 -o \"$2\" -w \"%{http_code}\" \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null); if [ \"$c\" != 200 ]; then c=$(curl -4 -sS --connect-timeout 6 -m 30 -o \"$2\" -w \"%{http_code}\" \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null); fi; echo \"${c:-000}\"; }",
+      // 預設清單（scope=cdn）之外，並行抓取該協議專用的清單（scope=v4 / v6），合併去重
+      // 每份清單：失敗（非 200 或沒有節點）時改用 IPv4 連線再試，仍失敗則等 2 秒重試一次；結果數量回報為 @@GN
+      "getnodes() { c=$(curl -sS --connect-timeout 6 -m 20 -o \"$2\" -w \"%{http_code}\" \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null); if [ \"$c\" != 200 ]; then c=$(curl -4 -sS --connect-timeout 6 -m 20 -o \"$2\" -w \"%{http_code}\" \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null); fi; echo \"${c:-000}\"; }",
       "gncount() { n=$(grep -c '^cdn' \"$1\" 2>/dev/null); echo \"${n:-0}\"; }",
-      'for sc in cdn' + (family === "4" ? " v4" : family === "6" ? " v6" : " v4 v6") + '; do',
-      '  f="$WORK/gn.$sc"; c=$(getnodes "$sc" "$f"); n=$(gncount "$f")',
-      '  if [ "$c" != 200 ] || [ "$n" = 0 ]; then sleep 3; c=$(getnodes "$sc" "$f"); n=$(gncount "$f"); fi',
+      "for sc in " + gnScopes + "; do",
+      '  ( f="$WORK/gn.$sc"; c=$(getnodes "$sc" "$f"); n=$(gncount "$f")',
+      '    if [ "$c" != 200 ] || [ "$n" = 0 ]; then sleep 2; c=$(getnodes "$sc" "$f"); n=$(gncount "$f"); fi',
+      '    printf "%s %s\\n" "$c" "$n" > "$WORK/gn.$sc.meta" ) &',
+      "done",
+      "wait",
+      "for sc in " + gnScopes + "; do",
+      '  c=000; n=0; read -r c n < "$WORK/gn.$sc.meta" 2>/dev/null || true',
       '  echo "@@GN|$sc|$n|$c"',
-      '  if [ "$c" = 200 ] && [ "$n" -gt 0 ]; then cat "$f" >> "$WORK/nodes.raw"; elif [ "$sc" != cdn ]; then echo "@@WARN|getnodes|TcpQuality 的 $sc 專用節點清單取得失敗（HTTP $c），只用預設清單，節點會比較少"; fi',
+      '  if [ "$c" = 200 ] && [ "$n" -gt 0 ]; then cat "$WORK/gn.$sc" >> "$WORK/nodes.raw"; elif [ "$sc" != cdn ]; then echo "@@WARN|getnodes|TcpQuality 的 $sc 專用節點清單取得失敗（HTTP $c），只用預設清單，節點會比較少"; fi',
       "done",
       "awk -F'\\t' '!seen[$1 FS $2 FS $3 FS $4 FS $6 FS $7]++' \"$WORK/nodes.raw\" > \"$WORK/nodes.tsv\" 2>/dev/null",
-      // 備援：清單裡沒有要測的協議時，直接解析 Zstatic CDN 節點網域
-      "if ! awk -F'\\t' -v f=' " + fams + " ' '$1==\"cdn\" && index(f, \" \" $2 \" \") {x=1} END{exit !x}' \"$WORK/nodes.tsv\" 2>/dev/null; then",
-      '  echo "@@WARN|getnodes|無法取得 TcpQuality 節點清單，改用 Zstatic CDN 節點（直接解析網域）"',
-      "  res() { if command -v getent >/dev/null 2>&1; then getent ahostsv$1 \"$2\" 2>/dev/null | awk 'NR==1{print $1}'; else nslookup -type=$( [ \"$1\" = 6 ] && echo AAAA || echo A ) \"$2\" 2>/dev/null | awk '/^Address: /{a=$2} END{print a}'; fi; }",
-      "  for pv in " + ZSTATIC_PROVINCES.map(function (x) { return x[0] + ":" + x[1]; }).join(" ") + "; do",
-      '    pc=${pv%%:*}; pn=${pv#*:}',
-      '    for ii in ct:电信 cu:联通 cm:移动; do',
-      '      ic=${ii%%:*}; in=${ii#*:}',
-      "      for zf in " + fams + "; do",
-      '        if [ "$zf" = 6 ]; then names="$pc-$ic-v6.ip.zstaticcdn.com"; else names="$pc-$ic-v4.ip.zstaticcdn.com $pc-$ic.ip.zstaticcdn.com"; fi',
-      '        for nm in $names; do zip=$(res "$zf" "$nm"); if [ -n "$zip" ]; then printf "cdn\\t%s\\t%s\\t%s\\t%s\\t%s\\t80\\n" "$zf" "$pn" "$in" "$nm" "$zip" >> "$WORK/nodes.tsv"; break; fi; done',
+      // 備援：逐協議檢查，缺少該協議節點時並行解析 Zstatic CDN 節點網域
+      'ZNEED=""',
+      "for zf in " + fams + "; do",
+      "  if ! awk -F'\\t' -v f=\"$zf\" '$1==\"cdn\" && $2==f {x=1} END{exit !x}' \"$WORK/nodes.tsv\" 2>/dev/null; then ZNEED=\"$ZNEED $zf\"; fi",
+      "done",
+      'if [ -n "$ZNEED" ]; then',
+      '  echo "@@WARN|getnodes|無法取得 TcpQuality 節點清單（IPv$(echo $ZNEED | tr " " "/")），改用 Zstatic CDN 節點（直接解析網域）"',
+      "  cat > \"$WORK/zres.sh\" <<'KCST_ZRES'",
+      'zf=$1; pc=$2; pn=$3; ic=$4; in=$5',
+      "res() { if command -v getent >/dev/null 2>&1; then getent ahostsv$1 \"$2\" 2>/dev/null | awk 'NR==1{print $1}'; else nslookup -type=$( [ \"$1\" = 6 ] && echo AAAA || echo A ) \"$2\" 2>/dev/null | awk '/^Address: /{a=$2} END{print a}'; fi; }",
+      'if [ "$zf" = 6 ]; then names="$pc-$ic-v6.ip.zstaticcdn.com"; else names="$pc-$ic-v4.ip.zstaticcdn.com $pc-$ic.ip.zstaticcdn.com"; fi',
+      'for nm in $names; do zip=$(res "$zf" "$nm"); if [ -n "$zip" ]; then printf "cdn\\t%s\\t%s\\t%s\\t%s\\t%s\\t80\\n" "$zf" "$pn" "$in" "$nm" "$zip"; break; fi; done',
+      "KCST_ZRES",
+      '  : > "$WORK/zjobs"',
+      '  for zf in $ZNEED; do',
+      "    for pv in " + zProvs.map(function (x) { return x[0] + ":" + x[1]; }).join(" ") + "; do",
+      '      pc=${pv%%:*}; pn=${pv#*:}',
+      "      for ii in " + zIsps.map(function (x) { return x[0] + ":" + x[1]; }).join(" ") + "; do",
+      '        ic=${ii%%:*}; in=${ii#*:}',
+      '        printf "%s %s %s %s %s\\n" "$zf" "$pc" "$pn" "$ic" "$in" >> "$WORK/zjobs"',
       "      done",
       "    done",
       "  done",
+      '  if echo x | xargs -P 2 -n 1 true >/dev/null 2>&1; then xargs -P "$PAR" -L 1 sh "$WORK/zres.sh" < "$WORK/zjobs" >> "$WORK/nodes.tsv"',
+      '  else while read -r z1 z2 z3 z4 z5; do sh "$WORK/zres.sh" "$z1" "$z2" "$z3" "$z4" "$z5"; done < "$WORK/zjobs" >> "$WORK/nodes.tsv"; fi',
       "fi",
       '[ -s "$WORK/nodes.tsv" ] || echo "@@WARN|getnodes|無法取得延遲測試節點清單"'
     );
@@ -509,8 +542,9 @@ function buildRemoteCommand(opts) {
       "    fails() { if ! grep -q '\"region\"' \"$1\" 2>/dev/null; then echo 99; else grep -oE \"\\\"$2_(up|down)_f\\\": *0(\\\\.0+)?(,|}|$)\" \"$1\" | wc -l | tr -d ' '; fi; }",
       "    RETRIES=" + retries,
       "    for P in " + list.map(shQuote).join(" ") + "; do",
+      "    SRVL_DONE=0",
       "    for M in " + runModes.join(" ") + "; do",
-      '      TRY=0; BEST=""; BESTF=999; NP0=$(netdev)',
+      '      TRY=0; BEST=""; BESTF=999; NP0=$(netdev); : > "$WORK/ss.best"',
       "      while :; do",
       "        TRY=$((TRY+1))",
       '        S0=$(snmp); : > "$WORK/ss.log"',
@@ -531,19 +565,22 @@ function buildRemoteCommand(opts) {
       '          echo "@@RTXS|$S0|$S1"',
       '          if [ "$rc" != 0 ]; then tr "\\r" "\\n" < "$WORK/sp.err" | grep -v "测速进度" | grep -v "^[[:space:]]*$" | tail -n 3 | sed "s/^/@@SPERR|/"; fi',
       '        } > "$O"',
-      '        if [ "$F" -lt "$BESTF" ]; then BESTF=$F; BEST="$O"; fi',
+      '        if [ "$F" -lt "$BESTF" ]; then BESTF=$F; BEST="$O"; cp -f "$WORK/ss.log" "$WORK/ss.best" 2>/dev/null; fi',
       '        if [ "$F" -eq 0 ] || [ "$TRY" -gt "$RETRIES" ]; then break; fi',
       "        sleep 3",
       "      done",
       '      cat "$BEST"',
-      // 這個測速點（含重測）實際用掉的流量
-      // 測速伺服器的大包延遲 / 丟包：從 ss 取樣取得泰爾測速連到的伺服器 IP:端口（每個協議取連線最多的那個）
-      '      if [ "${LARGE:-0}" = 1 ] && [ "$HAS_SS" = 1 ] && [ "$M" = "' + runModes[0] + '" ] && [ -s "$WORK/ss.log" ]; then',
-      "        awk '{ n = split($1, a, \"_\"); c[$2 \" \" a[n]]++ } END { for (k in c) print c[k], k }' \"$WORK/ss.log\" | sort -rn | awk '!seen[$2]++ { print $2, $3 }' | while read -r sf peer; do",
+      // 測速伺服器的大包延遲 / 丟包：從最佳那次的 ss 取樣依資料段總量挑選測速伺服器，尊重 large.skip 並去除 ::ffff:
+      '      if [ "${LARGE:-0}" = 1 ] && [ "$HAS_SS" = 1 ] && [ "$SRVL_DONE" = 0 ] && [ -s "$WORK/ss.best" ]; then',
+      "        awk '{ n = split($1, a, \"_\"); k = $2 \" \" a[n]; seg = $3 + $4; if (seg > m[$1]) m[$1] = seg; p[$1] = k; cnt[k]++ } END { for (c in m) w[p[c]] += m[c]; for (k in cnt) print w[k] + 0, cnt[k], k }' \"$WORK/ss.best\" | sort -k1,1rn -k2,2rn | awk '!seen[$3]++ { print $3, $4 }' | while read -r sf peer; do",
+      '          grep -qx "$sf" "$WORK/large.skip" 2>/dev/null && continue',
       '          case "$peer" in \\[*) sip=${peer#\\[}; sip=${sip%%\\]*}; sport=${peer##*:} ;; *) sip=${peer%:*}; sport=${peer##*:} ;; esac',
+      '          case "$sip" in ::ffff:*|::FFFF:*) sip=${sip#::[fF][fF][fF][fF]:} ;; esac',
       '          sh "$WORK/large.sh" "$sf" "$P" - srv "$sip" "$sport" 10 | sed "s/^@@LATL|/@@SRVL|/"',
       "        done",
+      "        SRVL_DONE=1",
       "      fi",
+      // 這個測速點（含重測）實際用掉的流量
       '      echo "@@TRAFFIC|point|$NP0|$(netdev)|$P|$M"',
       '      if [ "$TRY" -gt 1 ]; then echo "@@RETRY|$P|$((TRY-1))|$BESTF|$M"; fi',
       '      rm -f "$WORK"/try.*',

@@ -222,7 +222,7 @@ Telegram / 後台頁面
 | GET | `/api/plugin/cn-speedtest/job?id=` | 任務與完整結果 |
 | GET | `/api/plugin/cn-speedtest/latest?uuid=` | 節點最近結果 |
 | GET | `/api/plugin/cn-speedtest/image?file=` | 結果圖 PNG |
-| POST | `/api/plugin/cn-speedtest/cancel` | `{id}` 停止等待（節點端會自行跑完） |
+| POST | `/api/plugin/cn-speedtest/cancel` | `{id}` 取消任務並停止節點上正在執行的測試 |
 | POST | `/api/plugin/cn-speedtest/jobs/delete` | `{id}` 刪除單筆已結束的任務紀錄 |
 | POST | `/api/plugin/cn-speedtest/jobs/clear` | 清除已結束的任務紀錄 |
 | POST | `/api/plugin/cn-speedtest/preview` | 預覽節點指令 |

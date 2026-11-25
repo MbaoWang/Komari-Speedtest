@@ -162,7 +162,9 @@ function parseOutput(raw, exitCode) {
       }
       case "@@TRAFFIC": {
         // @@TRAFFIC|種類|rx0|tx0|rx1|tx1[|測速點|模式]
-        var rx = num(p[4]) - num(p[2]), tx = num(p[5]) - num(p[3]);
+        var rx0 = num(p[2]), tx0 = num(p[3]), rx1 = num(p[4]), tx1 = num(p[5]);
+        if (rx0 === null || tx0 === null || rx1 === null || tx1 === null) break;
+        var rx = rx1 - rx0, tx = tx1 - tx0;
         if (!isFinite(rx) || !isFinite(tx) || rx < 0 || tx < 0) break;
         var tr = { rx: rx, tx: tx };
         if (p[1] === "total") res.traffic.total = tr;
@@ -247,11 +249,28 @@ function parseOutput(raw, exitCode) {
     });
   });
   order.forEach(function (k) { res.speed.push(merged[k]); });
-  // 每個測速點的流量（單 / 多線程與重測加總）
+  function matchRegion(region, point) {
+    if (!region || !point) return false;
+    return region === point || (region.length > point.length && region.slice(-point.length) === point);
+  }
+  // 每個測速點的流量（單 / 多線程與重測加總；雙棧同點依該模式速度比例分攤，避免重複計成兩倍）
   res.traffic.points.forEach(function (t) {
-    res.speed.forEach(function (r) {
-      if (r.region !== t.point) return;
-      r.trafficRx = (r.trafficRx || 0) + t.rx; r.trafficTx = (r.trafficTx || 0) + t.tx;
+    var matched = res.speed.filter(function (r) { return matchRegion(r.region, t.point); });
+    if (!matched.length) return;
+    if (matched.length === 1) {
+      matched[0].trafficRx = (matched[0].trafficRx || 0) + t.rx;
+      matched[0].trafficTx = (matched[0].trafficTx || 0) + t.tx;
+      return;
+    }
+    var rxW = matched.map(function (r) { return Math.max(0, (t.mode === "multi" ? r.multiDown : t.mode === "single" ? r.singleDown : (r.singleDown || 0) + (r.multiDown || 0)) || 0); });
+    var txW = matched.map(function (r) { return Math.max(0, (t.mode === "multi" ? r.multiUp : t.mode === "single" ? r.singleUp : (r.singleUp || 0) + (r.multiUp || 0)) || 0); });
+    var sumRx = rxW.reduce(function (a, b) { return a + b; }, 0);
+    var sumTx = txW.reduce(function (a, b) { return a + b; }, 0);
+    matched.forEach(function (r, idx) {
+      var drx = sumRx > 0 ? Math.round(t.rx * rxW[idx] / sumRx) : Math.round(t.rx / matched.length);
+      var dtx = sumTx > 0 ? Math.round(t.tx * txW[idx] / sumTx) : Math.round(t.tx / matched.length);
+      r.trafficRx = (r.trafficRx || 0) + drx;
+      r.trafficTx = (r.trafficTx || 0) + dtx;
     });
   });
   if (blocks.length && !anyRows) res.errors.push("泰爾測速全部失敗");
@@ -282,7 +301,7 @@ function parseOutput(raw, exitCode) {
   // 測速伺服器的大包延遲 / 丟包 → 套到測速結果
   res.srvLarge.forEach(function (x) {
     res.speed.forEach(function (r) {
-      if (r.region === x.point && r.family === x.family) { r.rttLarge = x.avg; r.lossLarge = x.loss; r.largeSent = x.sent; }
+      if (matchRegion(r.region, x.point) && r.family === x.family) { r.rttLarge = x.avg; r.lossLarge = x.loss; r.largeSent = x.sent; }
     });
   });
   res.speed.sort(function (a, b) { return a.family < b.family ? -1 : a.family > b.family ? 1 : 0; });

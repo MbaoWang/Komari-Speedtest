@@ -24,6 +24,8 @@ function newId() { return Date.now().toString(36) + "-" + Math.random().toString
 function createJobManager(server, getConfig) {
   var state = null;
   var pollTimer = null;
+  var saveTimer = null;
+  var dirty = false;
   var unloaded = false;
   var listeners = { nodeDone: [], jobDone: [] };
   var nodeCache = null;
@@ -48,7 +50,10 @@ function createJobManager(server, getConfig) {
     return state;
   }
 
-  function save() {
+  function flushSave() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (!dirty && !state) return;
+    dirty = false;
     var s = load();
     // 只保留最近的任務，較舊任務移除結果內容以控制檔案大小
     s.jobs.sort(function (a, b) { return Date.parse(b.startedAt) - Date.parse(a.startedAt); });
@@ -60,6 +65,13 @@ function createJobManager(server, getConfig) {
       fs.writeFileSync(p + ".tmp", JSON.stringify(s));
       fs.renameSync(p + ".tmp", p);
     } catch (e) { console.error("[cn-speedtest] 寫入狀態失敗：" + errText(e)); }
+  }
+
+  function save(immediate) {
+    dirty = true;
+    if (immediate || unloaded) { flushSave(); return; }
+    if (saveTimer) return;
+    saveTimer = setTimeout(function () { saveTimer = null; flushSave(); }, 300);
   }
 
   function on(ev, fn) { if (listeners[ev]) listeners[ev].push(fn); }
@@ -194,7 +206,7 @@ function createJobManager(server, getConfig) {
     };
     uuids.forEach(function (u) { job.names[u] = known[u].name; });
     load().jobs.unshift(job);
-    save();
+    save(true);
     schedulePoll(1500);
     return job;
   }
@@ -208,7 +220,7 @@ function createJobManager(server, getConfig) {
     job.results[uuid] = parsed;
     var s = load();
     if (!s.latest[uuid]) s.latest[uuid] = {};
-    if (parsed.latency.length) s.latest[uuid].ping = { at: parsed.finishedAt, jobId: job.id, family: job.family, latency: parsed.latency, latencyLarge: parsed.latencyLarge, largeSize: parsed.largeSize, ip4: parsed.ip4, ip6: parsed.ip6 };
+    if (parsed.latency.length || parsed.latencyLarge.length) s.latest[uuid].ping = { at: parsed.finishedAt, jobId: job.id, family: job.family, latency: parsed.latency, latencyLarge: parsed.latencyLarge, largeSize: parsed.largeSize, ip4: parsed.ip4, ip6: parsed.ip6 };
     if (parsed.speed.length) s.latest[uuid].speed = { at: parsed.finishedAt, jobId: job.id, family: job.family, points: job.points, mode: job.mode, speed: parsed.speed, exit: parsed.exit };
     return true;
   }
@@ -222,7 +234,7 @@ function createJobManager(server, getConfig) {
     if (job.status === "done" && job.clients.every(function (u) { return !job.results[u].ok; })) job.status = "failed";
     job.error = error && error !== "cancelled" ? error : null;
     job.finishedAt = nowIso();
-    save();
+    save(true);
     emit("jobDone", job);
   }
 
@@ -274,13 +286,23 @@ function createJobManager(server, getConfig) {
     return true;
   }
 
-  // 結果圖產生後記錄到任務與節點最新結果
+  // 結果圖產生後記錄到任務與節點最新結果（失敗的測試不覆蓋該節點先前有效的最新結果圖）
   function setImage(job, uuid, img) {
     if (!img || !job.results[uuid]) return;
     job.results[uuid].image = { file: img.file, url: img.url };
     var l = load().latest[uuid];
-    if (l) l.image = { file: img.file, url: img.url, at: new Date().toISOString(), jobId: job.id, type: job.type };
+    if (l && job.results[uuid].ok && img.file) l.image = { file: img.file, url: img.url, at: new Date().toISOString(), jobId: job.id, type: job.type };
     save();
+  }
+
+  // 目前被各節點「最新結果」引用的圖片檔名（清圖時保留，避免公開頁破圖）
+  function latestImageFiles() {
+    var lat = load().latest || {};
+    var out = [];
+    Object.keys(lat).forEach(function (u) {
+      if (lat[u] && lat[u].image && lat[u].image.file) out.push(lat[u].image.file);
+    });
+    return out;
   }
 
   // 清除已結束的任務紀錄（不影響各節點的最新結果與公開頁）
@@ -288,7 +310,7 @@ function createJobManager(server, getConfig) {
     var s = load();
     var before = s.jobs.length;
     s.jobs = s.jobs.filter(function (j) { return j.status === "running"; });
-    save();
+    save(true);
     return before - s.jobs.length;
   }
 
@@ -299,13 +321,13 @@ function createJobManager(server, getConfig) {
     if (!job) return false;
     if (job.status === "running") throw new Error("任務執行中，請先取消再刪除");
     s.jobs = s.jobs.filter(function (j) { return j.id !== id; });
-    save();
+    save(true);
     return true;
   }
 
   // 後台頁面上次使用的測試設定（下次打開頁面沿用）
   function getWebPrefs() { return load().webPrefs || null; }
-  function setWebPrefs(p) { load().webPrefs = p; save(); }
+  function setWebPrefs(p) { load().webPrefs = p; save(true); }
 
   function getJob(id) { return load().jobs.filter(function (j) { return j.id === id; })[0] || null; }
   function jobs() { return load().jobs; }
@@ -319,9 +341,10 @@ function createJobManager(server, getConfig) {
   function shutdown() {
     unloaded = true;
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    if (dirty) flushSave();
   }
 
-  return { start: start, shutdown: shutdown, run: run, deleteJob: deleteJob, getWebPrefs: getWebPrefs, setWebPrefs: setWebPrefs, clearFinished: clearFinished, setImage: setImage, cancel: cancel, nodes: nodes, nodeName: nodeName, getJob: getJob, jobs: jobs, latest: latest, running: running, on: on };
+  return { start: start, shutdown: shutdown, run: run, deleteJob: deleteJob, getWebPrefs: getWebPrefs, setWebPrefs: setWebPrefs, clearFinished: clearFinished, setImage: setImage, latestImageFiles: latestImageFiles, cancel: cancel, nodes: nodes, nodeName: nodeName, getJob: getJob, jobs: jobs, latest: latest, running: running, on: on, pollOnce: pollOnce };
 }
 
 module.exports = { createJobManager: createJobManager };

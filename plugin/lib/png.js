@@ -1,8 +1,13 @@
 // plugin/lib/png.js
-// 極簡 PNG 編碼器（8-bit 索引色），純 JavaScript，不依賴 zlib。
-// 壓縮：deflate 固定霍夫曼 + 只找距離 1 / 距離 = 一列寬 的重複（表格圖片大量單色區塊，壓縮率很好）。
+// 極簡 PNG 編碼器（8-bit 索引色），有 Node zlib 時優先使用以縮小圖檔並提速，否則退回純 JavaScript deflate。
 
 "use strict";
+
+var NATIVE_ZLIB = null;
+try {
+  var z = require("zlib");
+  if (z && typeof z.deflateSync === "function") NATIVE_ZLIB = z;
+} catch (e) { /* 純 JS 環境無 zlib，使用內建實作 */ }
 
 var CRC_TABLE = null;
 function crcTable() {
@@ -35,36 +40,50 @@ BitWriter.prototype.ensure = function () {
     this.buf = n;
   }
 };
-// 依 LSB 先寫入 n 個位元
+// 依 LSB 先寫入 n 個位元（n <= 16）
 BitWriter.prototype.write = function (value, n) {
-  for (var i = 0; i < n; i++) {
-    this.cur |= ((value >>> i) & 1) << this.bit;
-    if (++this.bit === 8) { this.ensure(); this.buf[this.pos++] = this.cur; this.cur = 0; this.bit = 0; }
+  this.cur |= value << this.bit;
+  this.bit += n;
+  if (this.bit >= 8) {
+    this.ensure();
+    while (this.bit >= 8) {
+      this.buf[this.pos++] = this.cur & 255;
+      this.cur >>>= 8;
+      this.bit -= 8;
+    }
   }
 };
-// 霍夫曼碼需 MSB 先
-BitWriter.prototype.writeCode = function (code, n) {
-  for (var i = n - 1; i >= 0; i--) {
-    this.cur |= ((code >>> i) & 1) << this.bit;
-    if (++this.bit === 8) { this.ensure(); this.buf[this.pos++] = this.cur; this.cur = 0; this.bit = 0; }
+// 霍夫曼碼需 MSB 先（預先反轉位元後一次寫入）
+function revBits(code, n) {
+  var r = 0;
+  for (var i = 0; i < n; i++) { r = (r << 1) | (code & 1); code >>>= 1; }
+  return r;
+}
+
+var LIT_CODE = new Uint16Array(288);
+var LIT_BITS = new Uint8Array(288);
+(function () {
+  for (var v = 0; v < 288; v++) {
+    if (v < 144) { LIT_CODE[v] = revBits(0x30 + v, 8); LIT_BITS[v] = 8; }
+    else if (v < 256) { LIT_CODE[v] = revBits(0x190 + v - 144, 9); LIT_BITS[v] = 9; }
+    else if (v < 280) { LIT_CODE[v] = revBits(v - 256, 7); LIT_BITS[v] = 7; }
+    else { LIT_CODE[v] = revBits(0xc0 + v - 280, 8); LIT_BITS[v] = 8; }
   }
-};
-BitWriter.prototype.finish = function () {
-  if (this.bit > 0) { this.ensure(); this.buf[this.pos++] = this.cur; }
-  return this.buf.subarray(0, this.pos);
-};
+})();
+var DIST_CODE = new Uint8Array(30);
+(function () { for (var d = 0; d < 30; d++) DIST_CODE[d] = revBits(d, 5); })();
 
 var LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
 var LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
 var DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
 var DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
 
-function writeLitLen(w, v) {
-  if (v < 144) w.writeCode(0x30 + v, 8);
-  else if (v < 256) w.writeCode(0x190 + v - 144, 9);
-  else if (v < 280) w.writeCode(v - 256, 7);
-  else w.writeCode(0xc0 + v - 280, 8);
-}
+BitWriter.prototype.finish = function () {
+  if (this.bit > 0) { this.ensure(); this.buf[this.pos++] = this.cur & 255; }
+  return this.buf.subarray(0, this.pos);
+};
+
+function writeLitLen(w, v) { w.write(LIT_CODE[v], LIT_BITS[v]); }
 function writeMatch(w, len, dist) {
   var i = LEN_BASE.length - 1;
   while (LEN_BASE[i] > len) i--;
@@ -72,7 +91,7 @@ function writeMatch(w, len, dist) {
   if (LEN_EXTRA[i]) w.write(len - LEN_BASE[i], LEN_EXTRA[i]);
   var d = DIST_BASE.length - 1;
   while (DIST_BASE[d] > dist) d--;
-  w.writeCode(d, 5);
+  w.write(DIST_CODE[d], 5);
   if (DIST_EXTRA[d]) w.write(dist - DIST_BASE[d], DIST_EXTRA[d]);
 }
 
@@ -83,23 +102,57 @@ function zlibDeflate(data, rowDist) {
   w.write(1, 2); // 固定霍夫曼
   var n = data.length;
   var i = 0;
-  var dists = rowDist > 1 && rowDist <= 32768 ? [1, rowDist] : [1];
+  var hasRow = rowDist > 1 && rowDist <= 32768;
+  var head = new Int32Array(4096);
+  head.fill(-1);
   while (i < n) {
     var bestLen = 0, bestDist = 0;
-    for (var k = 0; k < dists.length; k++) {
-      var d = dists[k];
-      if (i < d) continue;
-      var l = 0;
-      while (l < 258 && i + l < n && data[i + l] === data[i + l - d]) l++;
-      if (l > bestLen) { bestLen = l; bestDist = d; }
+    // 1. 距離 1（同色水平延伸）
+    if (i >= 1 && data[i] === data[i - 1]) {
+      var l1 = 1;
+      var max1 = Math.min(258, n - i);
+      while (l1 < max1 && data[i + l1] === data[i + l1 - 1]) l1++;
+      if (l1 > bestLen) { bestLen = l1; bestDist = 1; }
     }
-    if (bestLen >= 3) { writeMatch(w, bestLen, bestDist); i += bestLen; }
-    else { writeLitLen(w, data[i]); i++; }
+    // 2. 距離 = 一列寬（上下列重複）
+    if (hasRow && i >= rowDist && bestLen < 258 && data[i] === data[i - rowDist]) {
+      var l2 = 1;
+      var max2 = Math.min(258, n - i);
+      while (l2 < max2 && data[i + l2] === data[i + l2 - rowDist]) l2++;
+      if (l2 > bestLen) { bestLen = l2; bestDist = rowDist; }
+    }
+    // 3. 3-byte hash 匹配（字形與相鄰列重複）
+    if (i + 2 < n) {
+      var h = ((data[i] << 4) ^ (data[i + 1] << 2) ^ data[i + 2]) & 4095;
+      var prev = head[h];
+      head[h] = i;
+      if (prev >= 0 && bestLen < 258) {
+        var hd = i - prev;
+        if (hd > 0 && hd <= 32768 && hd !== 1 && hd !== rowDist && data[i] === data[prev] && data[i + 1] === data[prev + 1] && data[i + 2] === data[prev + 2]) {
+          var l3 = 3;
+          var max3 = Math.min(258, n - i);
+          while (l3 < max3 && data[i + l3] === data[prev + l3]) l3++;
+          if (l3 > bestLen) { bestLen = l3; bestDist = hd; }
+        }
+      }
+    }
+    if (bestLen >= 3) {
+      writeMatch(w, bestLen, bestDist);
+      i += bestLen;
+    } else {
+      writeLitLen(w, data[i]);
+      i++;
+    }
   }
   writeLitLen(w, 256);
   var body = w.finish();
-  var a = 1, b = 0;
-  for (var j = 0; j < n; j++) { a = (a + data[j]) % 65521; b = (b + a) % 65521; }
+  // Adler-32（每 5552 位元組取一次餘數，避免溢位同時減少模運算）
+  var a = 1, b = 0, j = 0;
+  while (j < n) {
+    var end = Math.min(n, j + 5552);
+    for (; j < end; j++) { a += data[j]; b += a; }
+    a %= 65521; b %= 65521;
+  }
   var out = new Uint8Array(body.length + 4);
   out.set(body);
   var ad = ((b << 16) | a) >>> 0;
@@ -129,11 +182,12 @@ function encodeIndexed(width, height, pixels, palette) {
   ihdr[8] = 8; ihdr[9] = 3; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
   var plte = new Uint8Array(palette.length * 3);
   palette.forEach(function (c, i) { plte[i * 3] = c[0]; plte[i * 3 + 1] = c[1]; plte[i * 3 + 2] = c[2]; });
+  var idat = NATIVE_ZLIB ? new Uint8Array(NATIVE_ZLIB.deflateSync(raw, { level: 6 })) : zlibDeflate(raw, stride);
   var parts = [
     new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
     chunk("IHDR", ihdr),
     chunk("PLTE", plte),
-    chunk("IDAT", zlibDeflate(raw, stride)),
+    chunk("IDAT", idat),
     chunk("IEND", new Uint8Array(0))
   ];
   var total = 0;
@@ -144,4 +198,4 @@ function encodeIndexed(width, height, pixels, palette) {
   return png;
 }
 
-module.exports = { encodeIndexed: encodeIndexed, crc32: crc32 };
+module.exports = { encodeIndexed: encodeIndexed, crc32: crc32, zlibDeflate: zlibDeflate };

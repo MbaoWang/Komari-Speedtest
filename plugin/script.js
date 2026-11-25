@@ -22,6 +22,7 @@ var bot = null;
 var startTimer = null;
 var imaging = null;
 var pending = {}; // jobId -> [Promise]：節點結果（含圖片）傳送中
+var delivered = {}; // jobId -> { uuid: true }：避免重複傳送且不寫入 state.json
 
 function errText(e) { return e && e.message ? e.message : String(e); }
 
@@ -90,10 +91,11 @@ function scheduleToCron(c) {
   var ps = remote.clampInt(c.peak_start, 0, 23, 20);
   var pe = remote.clampInt(c.peak_end, 1, 24, 24);
   var pStep = /15/.test(String(c.peak_interval || "")) ? 15 : 30;
-  var inPeak = function (h) { return peak && (ps < pe ? h >= ps && h < pe : h >= ps || h < pe); };
+  var inPeak = function (h) { return peak && (ps === pe ? false : ps < pe ? h >= ps && h < pe : h >= ps || h < pe); };
   var peakSlots = [];
   if (peak) for (var h = 0; h < 24; h++) if (inPeak(h)) { var ms = []; for (var m = 0; m < 60; m += pStep) ms.push(m); peakSlots.push({ h: h, m: ms }); }
-  var peakText = peak ? "晚高峰 " + pad2(ps) + ":00–" + pad2(pe % 24) + ":00 每" + pStep + "分鐘" : "";
+  var peakActive = peak && peakSlots.length > 0;
+  var peakText = peakActive ? "晚高峰 " + pad2(ps) + ":00–" + pad2(pe % 24) + ":00 每" + pStep + "分鐘" : "";
 
   var hour = remote.clampInt(c.schedule_hour, 0, 23, 4);
   var specs = [], text = "";
@@ -111,9 +113,9 @@ function scheduleToCron(c) {
     specs = inPeak(hour) ? [] : slotsToCron([{ h: hour, m: [0] }], wd);
     text = "每" + WEEKDAYS[wd] + " " + pad2(hour) + ":00";
   }
-  if (peak) specs = specs.concat(slotsToCron(peakSlots));
+  if (peakActive) specs = specs.concat(slotsToCron(peakSlots));
   if (!specs.length) return { specs: [], text: "" };
-  return { specs: specs, text: (peak ? peakText + (text ? "，其餘時間 " + text : "") : text) + "（UTC+8）" };
+  return { specs: specs, text: (peakActive ? peakText + (text ? "，其餘時間 " + text : "") : text) + "（UTC+8）" };
 }
 
 // 定時測試項目：選單顯示中文，相容舊的 ping / speed / full
@@ -128,6 +130,7 @@ function normalizeConfig(raw) {
   var c = raw || {};
   var pts = "";
   try { pts = remote.normPoints(c.default_points); } catch (e) { console.warn("[cn-speedtest] 預設測速點格式錯誤，改用北上廣"); }
+  var sched = scheduleToCron(c);
   return {
     tgEnabled: bool(c.tg_enabled, false),
     tgToken: String(c.tg_token || "").trim(),
@@ -161,9 +164,9 @@ function normalizeConfig(raw) {
     taierUrl: String(c.taier_url || "").trim(),
     customTargets: String(c.custom_targets || ""),
     maxConcurrentJobs: remote.clampInt(c.max_jobs, 1, 20, 3),
-    cronSpecs: scheduleToCron(c).specs,
-    cronSpec: scheduleToCron(c).specs.join("；"),
-    cronText: scheduleToCron(c).text,
+    cronSpecs: sched.specs,
+    cronSpec: sched.specs.join("；"),
+    cronText: sched.text,
     cronType: cronTypeOf(c.cron_type),
     cronNodes: nodeList(c.cron_nodes)
   };
@@ -194,7 +197,8 @@ function queryParam(req, name) {
   var q = req && req.query;
   if (q && q[name] !== undefined) return Array.isArray(q[name]) ? q[name][0] : q[name];
   var m = String((req && req.url) || "").match(new RegExp("[?&]" + name + "=([^&]*)"));
-  return m ? decodeURIComponent(m[1]) : "";
+  if (!m) return "";
+  try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
 }
 
 // 給後台頁面用：任務摘要（不含完整結果）
@@ -254,7 +258,9 @@ async function publicView() {
     if (l.speed) item.speed = { at: l.speed.at, family: l.speed.family, points: l.speed.points, mode: l.speed.mode, exit: l.speed.exit, speed: l.speed.speed.map(function (r) {
       return { family: r.family, prov: r.prov, isp: r.isp, rtt: r.rtt, singleDown: r.singleDown, singleUp: r.singleUp, multiDown: r.multiDown, multiUp: r.multiUp, upRetrans: r.upRetrans, rtxSource: r.rtxSource, rttLarge: r.rttLarge, lossLarge: r.lossLarge };
     }) };
-    item.image = Boolean(l.image && l.image.file && !c.imageShowFullIp);
+    var hasImg = Boolean(l.image && l.image.file && !c.imageShowFullIp && (!imaging || imaging.exists(l.image.file)));
+    item.image = hasImg;
+    if (hasImg && l.image.at) item.imageAt = l.image.at;
     nodes.push(item);
   });
   var site = await siteSettings();
@@ -308,7 +314,7 @@ function registerRoutes() {
       historyKeep: c.historyKeep,
       lastSettings: mgr.getWebPrefs(),
       provinces: remote.PROVINCES,
-      defaults: { family: c.defaultFamily, mode: c.defaultMode, points: c.defaultPoints, isps: c.defaultIsps, duration: c.duration, retries: c.speedRetries },
+      defaults: { family: c.defaultFamily, mode: c.defaultMode, points: c.defaultPoints, isps: c.defaultIsps, duration: c.duration, retries: c.speedRetries, showFullIp: c.tgShowFullIp },
       schedule: c.cronSpec ? c.cronText + "｜" + ({ ping: "延遲", speed: "測速", full: "完整" }[c.cronType] || c.cronType) : "",
       publicPage: { enabled: c.publicEnabled, url: "/api/plugin/" + SHORT + "/public/" },
       telegram: { enabled: c.tgEnabled, configured: Boolean(c.tgToken), running: Boolean(bot && bot.isRunning()), allowed: c.tgAllowedIds.length }
@@ -418,9 +424,9 @@ function setupCron() {
 
 // 節點完成：產生結果圖 → 存檔 / 上傳 → Telegram
 function deliver(job, uuid, result) {
-  job.delivered = job.delivered || {};
-  if (job.delivered[uuid]) return;
-  job.delivered[uuid] = true;
+  var map = delivered[job.id] = delivered[job.id] || {};
+  if (map[uuid]) return;
+  map[uuid] = true;
   // 取消的任務：沒有結果的節點不產生圖片、不傳訊息（狀態訊息會改成「已取消」）
   if (job.status === "cancelled" && (!result || !result.ok)) return;
   var p = (async function () {
@@ -444,13 +450,15 @@ function load() {
     if (!mgr) return;
     mgr.start();
     setupCron();
-    imaging = imagingLib.createImaging(cfg);
+    imaging = imagingLib.createImaging(cfg, mgr.latestImageFiles);
     mgr.on("nodeDone", function (job, uuid, result) { deliver(job, uuid, result); });
     mgr.on("jobDone", function (job) {
       // 逾時等沒有觸發 nodeDone 的節點也要產生結果
-      job.clients.forEach(function (u) { if (!(job.delivered && job.delivered[u])) deliver(job, u, job.results[u]); });
+      var map = delivered[job.id] || {};
+      job.clients.forEach(function (u) { if (!map[u]) deliver(job, u, job.results[u]); });
       var list = pending[job.id] || [];
       delete pending[job.id];
+      delete delivered[job.id];
       return Promise.all(list).then(function () { return bot && bot.onJobDone(job); });
     });
     if (config.tgEnabled && config.tgToken) {
@@ -466,6 +474,8 @@ function unload() {
   if (startTimer) { clearTimeout(startTimer); startTimer = null; }
   if (bot) { bot.stop(); bot = null; }
   imaging = null;
+  pending = {};
+  delivered = {};
   if (mgr) { mgr.shutdown(); mgr = null; }
   console.info("[cn-speedtest] plugin unloaded");
 }

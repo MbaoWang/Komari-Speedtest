@@ -228,8 +228,9 @@ function nodeResultHTML(job, nodeName, r, opts) {
   if (retryNote(r)) parts.push("↻ " + esc(retryNote(r)));
   if (r.errors.length) parts.push("\n❌ " + r.errors.map(esc).join("\n❌ "));
   if (r.warnings.length && opts.showWarnings !== false) parts.push("⚠️ " + r.warnings.slice(0, 4).map(esc).join("\n⚠️ "));
-  var took = job.finishedAt && job.startedAt ? Math.round((Date.parse(job.finishedAt) - Date.parse(job.startedAt)) / 1000) : null;
-  if (took !== null) parts.push("\n<i>耗時 " + took + " 秒｜" + esc(fmtTime(job.finishedAt)) + "</i>");
+  var endAt = (r && r.finishedAt) || job.finishedAt;
+  var took = endAt && job.startedAt ? Math.max(0, Math.round((Date.parse(endAt) - Date.parse(job.startedAt)) / 1000)) : null;
+  if (took !== null) parts.push("\n<i>耗時 " + took + " 秒｜" + esc(fmtTime(endAt)) + "</i>");
   return parts.join("\n");
 }
 
@@ -256,8 +257,8 @@ function shortSummaryHTML(job, nodeName, r) {
     parts.push(esc(line));
   });
   if (trafficText(r)) parts.push("📦 " + esc(trafficText(r)));
-  if (retryNote(r)) parts.push("↻ " + esc(retryNote(r)).slice(0, 200));
-  if (r.errors && r.errors.length) parts.push("❌ " + esc(r.errors.join("；")).slice(0, 300));
+  if (retryNote(r)) parts.push("↻ " + esc(retryNote(r).slice(0, 200)));
+  if (r.errors && r.errors.length) parts.push("❌ " + esc(r.errors.join("；").slice(0, 300)));
   return parts.join("\n");
 }
 
@@ -287,6 +288,60 @@ function fmtTime(iso) {
   return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate()) + " " + p(d.getUTCHours()) + ":" + p(d.getUTCMinutes()) + " (UTC+8)";
 }
 
+// 安全截斷 Telegram HTML：不切斷標籤、HTML 實體與 emoji，並補齊未關閉的標籤
+function truncateHTML(html, limit) {
+  html = String(html || "");
+  if (html.length <= limit) return html;
+  var out = "";
+  var stack = [];
+  var closeLen = 0;
+  var i = 0;
+  while (i < html.length) {
+    var ch = html.charAt(i);
+    if (ch === "<") {
+      var gt = html.indexOf(">", i);
+      if (gt < 0) break;
+      var tok = html.slice(i, gt + 1);
+      var m = tok.match(/^<(\/?)([a-zA-Z0-9]+)/);
+      var nextStack = stack.slice();
+      var nextCloseLen = closeLen;
+      if (m) {
+        var tag = m[2].toLowerCase();
+        if (m[1]) {
+          var idx = nextStack.lastIndexOf(tag);
+          if (idx >= 0) { nextStack.splice(idx, 1); nextCloseLen -= tag.length + 3; }
+        } else if (!/\/>$/.test(tok)) {
+          nextStack.push(tag);
+          nextCloseLen += tag.length + 3;
+        }
+      }
+      if (out.length + tok.length + 1 + nextCloseLen > limit) break;
+      out += tok;
+      stack = nextStack;
+      closeLen = nextCloseLen;
+      i = gt + 1;
+      continue;
+    }
+    var unit = ch;
+    if (ch === "&") {
+      var ent = html.slice(i, i + 12).match(/^&[a-zA-Z0-9#]+;/);
+      if (ent) unit = ent[0];
+    } else {
+      var code = html.charCodeAt(i);
+      if (code >= 0xd800 && code <= 0xdbff && i + 1 < html.length) {
+        var lo = html.charCodeAt(i + 1);
+        if (lo >= 0xdc00 && lo <= 0xdfff) unit = html.slice(i, i + 2);
+      }
+    }
+    if (out.length + unit.length + 1 + closeLen > limit) break;
+    out += unit;
+    i += unit.length;
+  }
+  out += "…";
+  for (var k = stack.length - 1; k >= 0; k--) out += "</" + stack[k] + ">";
+  return out;
+}
+
 // 依 Telegram 4096 字元限制切段，盡量在 <pre> 區塊之間切開
 function splitMessage(html, limit) {
   limit = limit || 3900;
@@ -299,11 +354,11 @@ function splitMessage(html, limit) {
     else cur = cur ? cur + "\n" + b : b;
   });
   if (cur) out.push(cur);
-  return out.map(function (s) { return s.length > 4096 ? s.slice(0, 4000) + "…" : s; });
+  return out.map(function (s) { return s.length > 4096 ? truncateHTML(s, 4096) : s; });
 }
 
 module.exports = {
   esc: esc, tIsp: tIsp, tProv: tProv, fmtMs: fmtMs, fmtMbps: fmtMbps, fmtTime: fmtTime,
   typeLabel: typeLabel, largeSizeLabel: largeSizeLabel, fmtBytes: fmtBytes, trafficText: trafficText, ispsLabel: ispsLabel, retryNote: retryNote, familyLabel: familyLabel, modeLabel: modeLabel, pointsLabel: pointsLabel,
-  latencyTables: latencyTables, speedTable: speedTable, retransTable: retransTable, fmtPct: fmtPct, shortSummaryHTML: shortSummaryHTML, nodeResultHTML: nodeResultHTML, splitMessage: splitMessage
+  latencyTables: latencyTables, speedTable: speedTable, retransTable: retransTable, fmtPct: fmtPct, shortSummaryHTML: shortSummaryHTML, nodeResultHTML: nodeResultHTML, truncateHTML: truncateHTML, splitMessage: splitMessage
 };

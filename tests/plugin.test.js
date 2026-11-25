@@ -259,3 +259,228 @@ test("IPv6 清單：共用節點標記、省份排序、Zstatic 備援", () => {
   assert.match(cmd, /\$pc-\$ic-v6\.ip\.zstaticcdn\.com/);
   assert.match(cmd, /@@SHARE/);
 });
+
+test("遠端腳本優化：PID 鎖自癒、依協議並行抓 IP、逐協議 Zstatic、@@SRVL 修正", () => {
+  const cmd4 = remote.buildRemoteCommand({ runId: "opt-v4", ping: true, speed: true, family: "4", provinceFilter: "上海", isps: ["电信"] });
+  assert.match(cmd4, /LOCK\/pid/);
+  assert.match(cmd4, /kill -0 "\$lp"/);
+  assert.match(cmd4, /https:\/\/4\.ipw\.cn/);
+  assert.doesNotMatch(cmd4, /https:\/\/6\.ipw\.cn/); // 單 IPv4 不浪費時間抓 IPv6
+  assert.match(cmd4, /sh:上海/);
+  assert.doesNotMatch(cmd4, /bj:北京/); // Zstatic 備援已先依 provinceFilter 過濾
+  assert.match(cmd4, /ct:电信/);
+  assert.doesNotMatch(cmd4, /cu:联通/); // Zstatic 備援已先依 isps 過濾
+  assert.match(cmd4, /LSIZE6_ORIG=\$LSIZE6/);
+  assert.match(cmd4, /ss\.best/);
+  assert.match(cmd4, /grep -qx "\$sf" "\$WORK\/large\.skip"/);
+  assert.match(cmd4, /::ffff:\*/);
+  execFileSync("sh", ["-n"], { input: cmd4 });
+
+  // 驗證 ss.best 權重選點邏輯：控制 API 連線樣本多但資料量少，應選出資料量最大的測速伺服器
+  const ssBest = [
+    "10.0.0.1:50001_1.1.1.1:443 4 5 5 0 0",
+    "10.0.0.1:50001_1.1.1.1:443 4 6 6 0 0",
+    "10.0.0.1:50001_1.1.1.1:443 4 7 7 0 0",
+    "10.0.0.1:50001_1.1.1.1:443 4 8 8 0 0",
+    "10.0.0.1:50002_[::ffff:2.2.2.2]:8080 4 5000 8000 10 0",
+    "10.0.0.1:50002_[::ffff:2.2.2.2]:8080 4 9000 12000 12 0"
+  ].join("\n") + "\n";
+  const picked = execFileSync("sh", ["-c",
+    `awk '{ n = split($1, a, "_"); k = $2 " " a[n]; seg = $3 + $4; if (seg > m[$1]) m[$1] = seg; p[$1] = k; cnt[k]++ } END { for (c in m) w[p[c]] += m[c]; for (k in cnt) print w[k] + 0, cnt[k], k }' | sort -k1,1rn -k2,2rn | awk '!seen[$3]++ { print $3, $4 }'`
+  ], { input: ssBest, encoding: "utf8" }).trim();
+  assert.strictEqual(picked, "4 [::ffff:2.2.2.2]:8080");
+});
+
+test("parser：空流量不誤判為 0、雙棧不重複計流量、城市前綴比對", () => {
+  const out = [
+    "@@BEGIN|2|Linux|x86_64",
+    "@@SPEED_BEGIN|深圳电信|single",
+    '[{"region":"广东深圳电信","family":"IPv4","rtt":"20ms","single_down_f":300,"single_up_f":100},{"region":"广东深圳电信","family":"IPv6","rtt":"25ms","single_down_f":100,"single_up_f":100}]',
+    "@@SPEED_END|0",
+    "@@SRVL|4|深圳电信|-|srv|10|10|18.0|19.5|21.0||0",
+    "@@TRAFFIC|point|0|0|400000000|200000000|深圳电信|single",
+    "@@TRAFFIC|total||||",
+    "@@END"
+  ].join("\n");
+  const r = parser.parseOutput(out, 0);
+  assert.strictEqual(r.traffic.total, null); // 空網卡讀數不應誤計為 0 KB
+  assert.strictEqual(r.speed.length, 2);
+  const v4 = r.speed.find((x) => x.family === "4");
+  const v6 = r.speed.find((x) => x.family === "6");
+  assert.strictEqual(v4.rttLarge, 19.5); // 深圳电信 對上 广东深圳电信
+  assert.strictEqual(v4.trafficRx + v6.trafficRx, 400000000); // 總和不重複計算
+  assert.strictEqual(v4.trafficRx, 300000000); // 依速度 3:1 分攤
+  assert.strictEqual(v6.trafficRx, 100000000);
+  assert.strictEqual(v4.trafficTx, 100000000);
+  assert.strictEqual(v6.trafficTx, 100000000);
+});
+
+test("format：單節點耗時使用 r.finishedAt 與安全 HTML 截斷", () => {
+  const r = parser.parseOutput(fixture, 0);
+  r.finishedAt = "2026-01-01T00:01:15Z";
+  const html = fmt.nodeResultHTML({ type: "ping", family: "4", startedAt: "2026-01-01T00:00:00Z", finishedAt: null }, "N1", r, {});
+  assert.match(html, /耗時 75 秒/);
+
+  const longHtml = "<b>標題</b>\n<pre>" + "A&lt;B🚀".repeat(500) + "</pre>";
+  const cut = fmt.truncateHTML(longHtml, 200);
+  assert.ok(cut.length <= 200);
+  assert.ok(cut.endsWith("…</pre>"));
+  assert.doesNotMatch(cut, /&lt(?![;])|<pre[^>]*$/); // 實體與標籤未截斷
+});
+
+test("png 純 JS deflate 與 render 優化驗證", () => {
+  const zlib = require("zlib");
+  const pngLib = require("../plugin/lib/png.js");
+  const render = require("../plugin/lib/render.js");
+  // 直接驗證純 JS zlibDeflate 輸出可被標準 zlib 完整還原
+  const stride = 201;
+  const raw = new Uint8Array(stride * 80);
+  for (let y = 0; y < 80; y++) {
+    raw[y * stride] = 0;
+    for (let x = 0; x < 200; x++) raw[y * stride + 1 + x] = (x < 50 ? 1 : ((x + y) % 7 === 0 ? 2 : 0));
+  }
+  const deflated = pngLib.zlibDeflate(raw, stride);
+  const inflated = zlib.inflateSync(Buffer.from(deflated));
+  assert.deepStrictEqual(new Uint8Array(inflated), raw);
+
+  // 粗體寬度與重複目標擇優、rttLarge 為 null 不報錯
+  const cv = new render.Canvas(300, 40, "#ffffff");
+  assert.ok(cv.textWidth("測試標題", true) > cv.textWidth("測試標題", false));
+  const png = render.renderResult(
+    { type: "full", family: "4", points: "北京", mode: "single", finishedAt: "2026-01-01T00:00:00Z" },
+    "Node",
+    {
+      latency: [
+        { family: "4", prov: "北京", isp: "电信", host: "a", sent: 10, recv: 10, loss: 0, min: 30, avg: 32, max: 35, jitter: 1 },
+        { family: "4", prov: "北京", isp: "电信", host: "b", sent: 10, recv: 0, loss: 100, min: null, avg: null, max: null, jitter: null }
+      ],
+      speed: [{ family: "4", prov: "北京", isp: "电信", rtt: 30, rttLarge: null, lossLarge: null, singleDown: 100, singleUp: 50, upRetrans: 0.5, rtxSource: "tcp_info" }],
+      errors: [], warnings: []
+    },
+    {}
+  );
+  assert.ok(png.length > 500);
+});
+
+test("Telegram：地名節點指令解析、callback_data <= 64 與 /last 大包顯示", async () => {
+  const fakeLatest = {
+    ping: {
+      at: "2026-01-01T00:00:00Z", family: "4", largeSize: { v4: 1400, v6: 1400, wanted: 1400 },
+      latency: [{ family: "4", prov: "上海", isp: "电信", host: "a", sent: 10, recv: 10, loss: 0, min: 20, avg: 22, max: 25, jitter: 1 }],
+      latencyLarge: [{ family: "4", prov: "上海", isp: "电信", host: "a", sent: 10, recv: 8, loss: 20, min: 25, avg: 28, max: 32, jitter: 2 }]
+    }
+  };
+  const bot = tg.createBot(
+    () => ({ tgAllowedIds: [], defaultPoints: "", defaultMode: "single", defaultFamily: "both", defaultIsps: [], tgApiBase: "x", tgToken: "", tgShowFullIp: false }),
+    { latest: (u) => (u === "u1" ? fakeLatest : u === "empty" ? {} : null), nodeName: (u) => u }
+  );
+  assert.deepStrictEqual(bot.parseText("延遲 香港").nodeTokens, ["香港"]);
+  assert.deepStrictEqual(bot.parseText("/last 台灣").nodeTokens, ["台灣"]);
+  let p = bot.parseText("測速 香港");
+  assert.deepStrictEqual([p.nodeTokens, p.points], [["香港"], null]);
+  p = bot.parseText("測速 香港 上海,广东");
+  assert.deepStrictEqual([p.nodeTokens, p.points], [["香港"], "上海,广东"]);
+
+  // 超長 UUID 不超過 Telegram 64 bytes 上限
+  const longUuid = "0123456789abcdef0123456789abcdef0123456789abcdef";
+  const kb = bot.resultMarkup({ id: "ml123456-abcdefgh", type: "speed", family: "both", clients: [longUuid] }, longUuid);
+  kb.inline_keyboard[0].forEach((btn) => assert.ok(Buffer.byteLength(btn.callback_data, "utf8") <= 64, btn.callback_data));
+
+  const lastTxt = await bot.lastResultText("u1");
+  assert.match(lastTxt, /大包（1400 B）回程延遲/);
+  const emptyTxt = await bot.lastResultText("empty");
+  assert.match(emptyTxt, /還沒有測試紀錄/);
+});
+
+test("jobs + imaging：生命週期、失敗不覆蓋最新圖、prune 保護最新圖", async () => {
+  const os = require("os");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kcst-test-"));
+  const prevStorage = global.__storageDir__;
+  global.__storageDir__ = tmpDir;
+  try {
+    const jobsLib = require("../plugin/lib/jobs.js");
+    const imagingLib = require("../plugin/lib/imaging.js");
+    let taskResults = [];
+    const execCalls = [];
+    const mockServer = {
+      async call(method, params) {
+        if (method === "admin:listClients") return [{ uuid: "node-1", name: "HK-1", region: "HK", os: "Linux", arch: "amd64", hidden: false, weight: 1 }];
+        if (method === "common:getNodesLatestStatus") return { "node-1": { online: true } };
+        if (method === "admin:exec") { execCalls.push(params); return { task_id: "t-" + execCalls.length }; }
+        if (method === "admin:getTaskById") return { results: taskResults };
+        return null;
+      }
+    };
+    const cfg = () => ({ defaultFamily: "4", defaultMode: "single", defaultPoints: "", defaultIsps: [], duration: 5, pingCount: 5, pingParallel: 4, provinceFilter: "", getNodesUrl: "", taierUrl: "", customTargets: "", speedRetries: 0, largeEnabled: false, largeSize: 1400, npingInstall: false, maxConcurrentJobs: 3, historyKeep: 40, imageEnabled: true, imageUpload: "none", imageShowFullIp: false });
+    const mgr = jobsLib.createJobManager(mockServer, cfg);
+    const img = imagingLib.createImaging(cfg, mgr.latestImageFiles);
+
+    // 1. 成功任務 → 寫入 latest 與圖片
+    const job1 = await mgr.run({ clients: ["node-1"], type: "ping", family: "4" });
+    taskResults = [{ client: "node-1", finished_at: "2026-01-01T00:00:10Z", exit_code: 0, result: fixture }];
+    await mgr.pollOnce();
+    assert.strictEqual(job1.status, "done");
+    const produced1 = await img.produce(job1, "node-1", "HK-1", job1.results["node-1"]);
+    mgr.setImage(job1, "node-1", produced1);
+    assert.strictEqual(mgr.latest("node-1").image.file, produced1.file);
+    assert.ok(img.exists(produced1.file));
+
+    // 2. 失敗任務 → 不得覆蓋 latest.image
+    const job2 = await mgr.run({ clients: ["node-1"], type: "ping", family: "4" });
+    taskResults = [{ client: "node-1", finished_at: "2026-01-01T00:01:10Z", exit_code: 1, result: "Remote control is disabled." }];
+    await mgr.pollOnce();
+    assert.strictEqual(job2.status, "failed");
+    const produced2 = await img.produce(job2, "node-1", "HK-1", job2.results["node-1"]);
+    mgr.setImage(job2, "node-1", produced2);
+    assert.strictEqual(job2.results["node-1"].image.file, produced2.file);
+    assert.strictEqual(mgr.latest("node-1").image.file, produced1.file); // 維持有效舊圖
+
+    // 3. prune 保護最新圖不被刪除（即使 mtime 最舊）
+    const imgDir = path.join(tmpDir, "images");
+    const oldTime = new Date(Date.now() - 100000);
+    fs.utimesSync(path.join(imgDir, produced1.file), oldTime, oldTime);
+    fs.writeFileSync(path.join(imgDir, "extra_1.png"), Buffer.from([1]));
+    fs.writeFileSync(path.join(imgDir, "extra_2.png"), Buffer.from([2]));
+    imagingLib.prune(mgr.latestImageFiles(), 2);
+    assert.ok(img.exists(produced1.file)); // 被保護
+
+    // 4. 取消與 shutdown flush
+    const job3 = await mgr.run({ clients: ["node-1"], type: "ping", family: "4" });
+    assert.strictEqual(mgr.cancel(job3.id), true);
+    assert.strictEqual(job3.status, "cancelled");
+    mgr.shutdown();
+    const persisted = JSON.parse(fs.readFileSync(path.join(tmpDir, "state.json"), "utf8"));
+    assert.strictEqual(persisted.latest["node-1"].image.file, produced1.file);
+  } finally {
+    if (prevStorage === undefined) delete global.__storageDir__;
+    else global.__storageDir__ = prevStorage;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("script.js：定時排程邊界（peak_start === peak_end、跨午夜）與 queryParam 安全解碼", () => {
+  const vm = require("vm");
+  const code = fs.readFileSync(path.join(__dirname, "../plugin/script.js"), "utf8") +
+    "\n;globalThis.__testExports = { scheduleToCron, queryParam };";
+  const sandbox = {
+    console, setTimeout, clearTimeout, Date, Math, Array, Object, String, Number, Boolean, RegExp, JSON, Error, Promise, Uint8Array, decodeURIComponent,
+    require: (m) => (m === "server" ? { route() {}, registerRPC() {}, cron() {} } : require(path.resolve(__dirname, "../plugin", m)))
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(code, sandbox);
+  const { scheduleToCron, queryParam } = sandbox.__testExports;
+
+  // peak_start === peak_end 不得展開成全天
+  const eq = scheduleToCron({ schedule: "關閉", peak_enabled: true, peak_start: 20, peak_end: 20, peak_interval: "每30分鐘" });
+  assert.deepStrictEqual([...eq.specs], []);
+
+  // 跨午夜晚高峰（22~2）正常展開 4 小時
+  const cross = scheduleToCron({ schedule: "關閉", peak_enabled: true, peak_start: 22, peak_end: 2, peak_interval: "每30分鐘" });
+  assert.ok(cross.specs.length > 0);
+  assert.match(cross.text, /22:00–02:00/);
+
+  // queryParam 遇到無效 % 編碼不拋錯
+  assert.strictEqual(queryParam({ url: "/api/plugin/cn-speedtest/image?file=%E0%A4%A" }, "file"), "%E0%A4%A");
+  assert.strictEqual(queryParam({ url: "/api/plugin/cn-speedtest/image?file=a%20b.png" }, "file"), "a b.png");
+});
+
