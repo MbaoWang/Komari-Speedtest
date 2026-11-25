@@ -245,3 +245,17 @@ test("大包延遲 / 丟包（nping）解析", () => {
   assert.match(cmd, /LSIZE4=1400/);
   assert.doesNotMatch(remote.buildRemoteCommand({ runId: "lg-2", ping: true, large: false }), /@@LATL_BEGIN/);
 });
+
+test("IPv6 清單：共用節點標記、省份排序、Zstatic 備援", () => {
+  const r = parser.parseOutput(fs.readFileSync(path.join(__dirname, "fixtures/node-output-v6-list.txt"), "utf8"), 0);
+  assert.strictEqual(r.latency.length, 93);
+  assert.strictEqual(r.latency[0].prov, "北京");
+  assert.strictEqual(r.latency[r.latency.length - 1].prov, "新疆");
+  const ln = r.latency.find((x) => x.prov === "辽宁" && x.isp === "移动");
+  assert.strictEqual(ln.sameAs, "河北移动");
+  assert.match(fmt.latencyTables(r.latency)[0].note, /遼寧移動＝河北移動/);
+  const cmd = remote.buildRemoteCommand({ runId: "zs-1", ping: true, family: "both" });
+  assert.match(cmd, /bj:北京/);
+  assert.match(cmd, /\$pc-\$ic-v6\.ip\.zstaticcdn\.com/);
+  assert.match(cmd, /@@SHARE/);
+});

@@ -91,7 +91,7 @@ function latencyTables(latency, tag) {
       if (!r.recv) return "×";
       var s = fmtMs(r.avg);
       if (r.loss > 0) s += "/" + Math.round(r.loss) + "%";
-      return s;
+      return s + (r.sameAs ? "*" : "");
     };
     var lines = [];
     lines.push(padR("IPv" + fam + tag, 8) + padL("電信", 9) + padL("聯通", 9) + padL("移動", 9));
@@ -119,7 +119,11 @@ function latencyTables(latency, tag) {
     } else {
       summary = "IPv" + fam + (tag ? " " + tag : "") + "：全部節點不通";
     }
-    out.push({ family: fam, table: lines.join("\n"), summary: summary });
+    var shared = rows.filter(function (r) { return r.sameAs; }).map(function (r) {
+      var m = String(r.sameAs).match(/^(.*?)(电信|联通|移动)?$/);
+      return tProv(r.prov) + tIsp(r.isp) + "＝" + tProv(m[1]) + tIsp(m[2] || "");
+    });
+    out.push({ family: fam, table: lines.join("\n"), summary: summary, note: shared.length ? "* 共用同一節點（Zstatic 在該省沒有獨立節點）：" + shared.join("、") : "" });
   });
   return out;
 }
@@ -199,6 +203,7 @@ function nodeResultHTML(job, nodeName, r, opts) {
     parts.push("\n<b>📶 三網 TCP 延遲 / 丟包（ms，平均/丟包率）</b>");
     lt.forEach(function (t) { parts.push("<pre>" + esc(t.table) + "</pre>"); });
     lt.forEach(function (t) { parts.push("• " + esc(t.summary)); });
+    lt.forEach(function (t) { if (t.note) parts.push(esc(t.note)); });
   }
   if (r.latencyLarge && r.latencyLarge.length) {
     var ll = latencyTables(r.latencyLarge, "大包");

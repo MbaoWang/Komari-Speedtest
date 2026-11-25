@@ -175,7 +175,7 @@ function latencyBlocks(latency, tag) {
     var lines = provs.map(function (p) { return { label: fmt.tProv(p), cells: map[p] }; });
     others.forEach(function (r) { lines.push({ label: fmt.tProv(r.prov) + fmt.tIsp(r.isp), cells: [r, null, null] }); });
     var t = fmt.latencyTables(rows, tag)[0];
-    out.push({ family: fam, lines: lines, summary: t ? t.summary : "", count: rows[0].sent, large: Boolean(tag) });
+    out.push({ family: fam, lines: lines, summary: t ? t.summary : "", note: t && !tag ? t.note : "", count: rows[0].sent, large: Boolean(tag) });
   });
   return out;
 }
@@ -191,7 +191,20 @@ function renderResult(job, nodeName, r, opts) {
 
   // 先算高度
   var h = 96 + 40;
-  lat.forEach(function (b) { h += 44 + ROW + b.lines.length * ROW + 40; });
+  // 註解太長時換行
+  var measure = new Canvas(W, 1, C.bg);
+  lat.forEach(function (b) {
+    b.noteLines = [];
+    if (!b.note) return;
+    var head = b.note.slice(0, b.note.indexOf("：") + 1), items = b.note.slice(head.length).split("、"), line = head;
+    items.forEach(function (it, i) {
+      var add = (line === head ? "" : "、") + it;
+      if (measure.textWidth(line + add) > W - 2 * PAD && line !== head) { b.noteLines.push(line + "、"); line = "　" + it; }
+      else line += add;
+    });
+    b.noteLines.push(line);
+  });
+  lat.forEach(function (b) { h += 44 + ROW + b.lines.length * ROW + 40 + b.noteLines.length * 28; });
   fams.forEach(function (f) { h += 44 + ROW + speed.filter(function (s) { return s.family === f; }).length * ROW + 16; });
   var anyLarge = speed.some(function (x) { return x.rttLarge !== undefined && x.rttLarge !== null; });
   if (fams.length) h += anyLarge ? 56 : 28;
@@ -240,7 +253,7 @@ function renderResult(job, nodeName, r, opts) {
         var gx = gx0 + gw * i;
         if (!c) { cv.text(gx + gw * 0.42, y + 4, "-", C.none, bg, { align: "right" }); return; }
         if (!c.recv) { cv.text(gx + gw * 0.42, y + 4, "不通", C.bad, bg, { align: "right" }); cv.text(gx + gw - 16, y + 4, "100%", C.bad, bg, { align: "right" }); return; }
-        cv.text(gx + gw * 0.42, y + 4, fmt.fmtMs(c.avg) + " ms", latColor(c.avg), bg, { align: "right" });
+        cv.text(gx + gw * 0.42, y + 4, fmt.fmtMs(c.avg) + " ms" + (c.sameAs ? "*" : ""), latColor(c.avg), bg, { align: "right" });
         cv.text(gx + gw - 16, y + 4, (c.loss < 10 ? c.loss.toFixed(1) : Math.round(c.loss)) + "%", lossColor(c.loss), bg, { align: "right" });
       });
       y += ROW;
@@ -249,6 +262,7 @@ function renderResult(job, nodeName, r, opts) {
     y += 8;
     cv.text(PAD, y, b.summary, C.sub, C.bg, { maxW: W - 2 * PAD });
     y += 32;
+    b.noteLines.forEach(function (nl) { cv.text(PAD, y - 4, nl, C.sub, C.bg, { maxW: W - 2 * PAD }); y += 28; });
   });
 
   // 泰爾測速 + 回程重傳

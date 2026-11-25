@@ -241,7 +241,7 @@ async function publicView() {
     var l = mgr.latest(n.uuid) || {};
     var item = { uuid: n.uuid, name: n.name, region: n.region, online: n.online, ping: null, speed: null, image: false };
     if (l.ping) item.ping = { at: l.ping.at, family: l.ping.family, largeSize: l.ping.largeSize || null, latencyLarge: (l.ping.latencyLarge || []).map(pubLat), latency: l.ping.latency.map(function (r) {
-      return { family: r.family, prov: r.prov, isp: r.isp, sent: r.sent, recv: r.recv, loss: r.loss, synRetrans: r.synRetrans, min: r.min, avg: r.avg, max: r.max, jitter: r.jitter };
+      return { family: r.family, prov: r.prov, isp: r.isp, sent: r.sent, recv: r.recv, loss: r.loss, synRetrans: r.synRetrans, min: r.min, avg: r.avg, max: r.max, jitter: r.jitter, sameAs: r.sameAs };
     }) };
     if (l.speed) item.speed = { at: l.speed.at, family: l.speed.family, points: l.speed.points, mode: l.speed.mode, exit: l.speed.exit, speed: l.speed.speed.map(function (r) {
       return { family: r.family, prov: r.prov, isp: r.isp, rtt: r.rtt, singleDown: r.singleDown, singleUp: r.singleUp, multiDown: r.multiDown, multiUp: r.multiUp, upRetrans: r.upRetrans, rtxSource: r.rtxSource, rttLarge: r.rttLarge, lossLarge: r.lossLarge };
@@ -254,7 +254,7 @@ async function publicView() {
 }
 
 function pubLat(r) {
-  return { family: r.family, prov: r.prov, isp: r.isp, sent: r.sent, recv: r.recv, loss: r.loss, min: r.min, avg: r.avg, max: r.max };
+  return { family: r.family, prov: r.prov, isp: r.isp, sent: r.sent, recv: r.recv, loss: r.loss, min: r.min, avg: r.avg, max: r.max, sameAs: r.sameAs };
 }
 
 function publicRoute(p, handler) {

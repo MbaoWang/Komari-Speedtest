@@ -95,6 +95,11 @@ function applyRetrans(rows, block) {
   return rows;
 }
 
+// 省份依地理順序排列（華北 → 東北 → 華東 → 華中 → 華南 → 西南 → 西北），與 TcpQuality / Zstatic 清單一致
+var PROV_ORDER = ["北京", "天津", "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江", "上海", "江苏", "浙江", "安徽", "福建", "江西", "山东",
+  "河南", "湖北", "湖南", "广东", "广西", "海南", "重庆", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆", "香港", "澳门", "台湾"];
+function provOrder(p) { var i = PROV_ORDER.indexOf(p); return i < 0 ? 99 : i; }
+
 function latRow(p) {
   var sent = num(p[5]) || 0;
   var recv = num(p[6]) || 0;
@@ -109,7 +114,7 @@ function latRow(p) {
 // 回傳：{ ok, os, arch, ip4, ip6, exit, latency:[], speed:[], errors:[], warnings:[] }
 function parseOutput(raw, exitCode) {
   var text = stripAnsi(raw);
-  var res = { ok: false, os: "", arch: "", ip4: "", ip6: "", exit: "", latency: [], speed: [], errors: [], warnings: [], speedRc: null, retries: [], latencyLarge: [], srvLarge: [], largeSize: null, traffic: { total: null, latency: null, speed: null, points: [] } };
+  var res = { ok: false, os: "", arch: "", ip4: "", ip6: "", exit: "", latency: [], speed: [], errors: [], warnings: [], speedRc: null, retries: [], latencyLarge: [], srvLarge: [], largeSize: null, shared: [], traffic: { total: null, latency: null, speed: null, points: [] } };
   var lines = text.split("\n");
   var cur = null;
   var blocks = [];
@@ -175,6 +180,7 @@ function parseOutput(raw, exitCode) {
         if (last && o0 !== null && o1 !== null && r0 !== null && r1 !== null && o1 > o0) last.snmp = { o: o1 - o0, r: Math.max(0, r1 - r0) };
         break;
       }
+      case "@@SHARE": res.shared.push({ family: p[1] === "6" ? "6" : "4", prov: p[2] || "", isp: p[3] || "", sameProv: p[4] || "", sameIsp: p[5] || "" }); break;
       case "@@LSIZE": res.largeSize = { v4: num(p[1]), v6: num(p[2]), wanted: num(p[3]) }; break;
       case "@@LATL": {
         var lr = latRow(p);
@@ -257,14 +263,21 @@ function parseOutput(raw, exitCode) {
   }
   var latSort = function (a, b) {
     if (a.family !== b.family) return a.family < b.family ? -1 : 1;
-    if (a.prov !== b.prov) return a.prov < b.prov ? -1 : 1;
+    if (a.prov !== b.prov) { var pa = provOrder(a.prov), pb = provOrder(b.prov); return pa !== pb ? pa - pb : (a.prov < b.prov ? -1 : 1); }
     return ispOrder(a.isp) - ispOrder(b.isp);
   };
   res.latency.sort(latSort);
+
   // 大包：nping 發不出去（例如 IPv6 需要指定網卡）的目標不列入
   var lErr = res.latencyLarge.filter(function (r) { return r.error; });
   res.latencyLarge = res.latencyLarge.filter(function (r) { return !r.error; }).sort(latSort);
   if (lErr.length) res.warnings.push("大包測試有 " + lErr.length + " 個目標無法發送（nping 錯誤），已略過");
+  // 共用節點標記（不同省份同一個 IP）
+  res.shared.forEach(function (x) {
+    res.latency.concat(res.latencyLarge).forEach(function (r) {
+      if (r.family === x.family && r.prov === x.prov && r.isp === x.isp) r.sameAs = x.sameProv + x.sameIsp;
+    });
+  });
   // 測速伺服器的大包延遲 / 丟包 → 套到測速結果
   res.srvLarge.forEach(function (x) {
     res.speed.forEach(function (r) {

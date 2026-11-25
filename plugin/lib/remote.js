@@ -152,6 +152,15 @@ function expandPoints(points, isps) {
   return out.filter(function (p, i, a) { return a.indexOf(p) === i; }).slice(0, 36);
 }
 
+// Zstatic CDN 國內節點（TcpQuality 的延遲目標就是這些節點）：TcpQuality 清單服務無法使用時，
+// 直接解析 <省代碼>-<ct|cu|cm>[-v6].ip.zstaticcdn.com 當作備援。
+var ZSTATIC_PROVINCES = [
+  ["bj", "北京"], ["tj", "天津"], ["he", "河北"], ["sx", "山西"], ["nm", "内蒙古"], ["ln", "辽宁"], ["jl", "吉林"], ["hl", "黑龙江"],
+  ["sh", "上海"], ["js", "江苏"], ["zj", "浙江"], ["ah", "安徽"], ["fj", "福建"], ["jx", "江西"], ["sd", "山东"], ["ha", "河南"],
+  ["hb", "湖北"], ["hn", "湖南"], ["gd", "广东"], ["gx", "广西"], ["hi", "海南"], ["cq", "重庆"], ["sc", "四川"], ["gz", "贵州"],
+  ["yn", "云南"], ["xz", "西藏"], ["sn", "陕西"], ["gs", "甘肃"], ["qh", "青海"], ["nx", "宁夏"], ["xj", "新疆"]
+];
+
 // 估算節點端執行時間（秒），用於 timeout 與插件端等待上限。
 function estimateSeconds(opts) {
   var fams = opts.family === "both" ? 2 : 1;
@@ -394,7 +403,22 @@ function buildRemoteCommand(opts) {
       "getnodes() { curl -fsSL --connect-timeout 6 -m 30 \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null || curl -4 -fsSL --connect-timeout 6 -m 30 \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null; }",
       'for sc in cdn' + (family === "4" ? " v4" : family === "6" ? " v6" : " v4 v6") + '; do getnodes "$sc" >> "$WORK/nodes.raw"; done',
       "awk -F'\\t' '!seen[$1 FS $2 FS $3 FS $4 FS $6 FS $7]++' \"$WORK/nodes.raw\" > \"$WORK/nodes.tsv\" 2>/dev/null",
-      '[ -s "$WORK/nodes.tsv" ] || echo "@@WARN|getnodes|無法取得 TcpQuality 節點清單"'
+      // 備援：清單裡沒有要測的協議時，直接解析 Zstatic CDN 節點網域
+      "if ! awk -F'\\t' -v f=' " + fams + " ' '$1==\"cdn\" && index(f, \" \" $2 \" \") {x=1} END{exit !x}' \"$WORK/nodes.tsv\" 2>/dev/null; then",
+      '  echo "@@WARN|getnodes|無法取得 TcpQuality 節點清單，改用 Zstatic CDN 節點（直接解析網域）"',
+      "  res() { if command -v getent >/dev/null 2>&1; then getent ahostsv$1 \"$2\" 2>/dev/null | awk 'NR==1{print $1}'; else nslookup -type=$( [ \"$1\" = 6 ] && echo AAAA || echo A ) \"$2\" 2>/dev/null | awk '/^Address: /{a=$2} END{print a}'; fi; }",
+      "  for pv in " + ZSTATIC_PROVINCES.map(function (x) { return x[0] + ":" + x[1]; }).join(" ") + "; do",
+      '    pc=${pv%%:*}; pn=${pv#*:}',
+      '    for ii in ct:电信 cu:联通 cm:移动; do',
+      '      ic=${ii%%:*}; in=${ii#*:}',
+      "      for zf in " + fams + "; do",
+      '        if [ "$zf" = 6 ]; then names="$pc-$ic-v6.ip.zstaticcdn.com"; else names="$pc-$ic-v4.ip.zstaticcdn.com $pc-$ic.ip.zstaticcdn.com"; fi',
+      '        for nm in $names; do zip=$(res "$zf" "$nm"); if [ -n "$zip" ]; then printf "cdn\\t%s\\t%s\\t%s\\t%s\\t%s\\t80\\n" "$zf" "$pn" "$in" "$nm" "$zip" >> "$WORK/nodes.tsv"; break; fi; done',
+      "      done",
+      "    done",
+      "  done",
+      "fi",
+      '[ -s "$WORK/nodes.tsv" ] || echo "@@WARN|getnodes|無法取得延遲測試節點清單"'
     );
     if (custom.length) {
       L.push("cat >> \"$WORK/nodes.tsv\" <<'KCST_CUSTOM'");
@@ -417,6 +441,8 @@ function buildRemoteCommand(opts) {
       '    gsub(/[|\\t "\\047\\\\]/,"",p); gsub(/[|\\t "\\047\\\\]/,"",s); gsub(/[|\\t "\\047\\\\]/,"",h);',
       '    print $2, p, s, h, $6, port',
       "  }' \"$WORK/nodes.tsv\" > \"$WORK/targets\"",
+      // 共用節點：不同省份用同一個 IP（Zstatic 在該省沒有獨立節點）→ @@SHARE|協議|省份|運營商|同一台的省份|運營商
+      "awk '{ k = $1 \" \" $5; if (k in first) print \"@@SHARE|\" $1 \"|\" $2 \"|\" $3 \"|\" first[k]; else first[k] = $2 \"|\" $3 }' \"$WORK/targets\"",
       'if [ ! -s "$WORK/targets" ]; then echo "@@ERR|nodes|沒有可用的延遲測試節點（getNodes 無回應或篩選條件過嚴）"; else',
       "cat > \"$WORK/probe.sh\" <<'KCST_PROBE'",
       probeScript(pingCount),
