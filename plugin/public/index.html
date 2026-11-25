@@ -99,6 +99,13 @@
       });
       var loss = sent ? lost / sent * 100 : null;
       out.push('<div class="stat"><b class="' + lossClass(loss) + '">' + (loss == null ? "-" : loss.toFixed(1) + "%") + "</b><span>整體丟包</span></div>");
+      var lgr = (n.ping.latencyLarge || []).filter(function (r) { return r.family === fam; });
+      if (lgr.length) {
+        var ls = 0, ll = 0;
+        lgr.forEach(function (r) { ls += r.sent; ll += r.sent - r.recv; });
+        var lloss = ls ? ll / ls * 100 : null;
+        out.push('<div class="stat"><b class="' + lossClass(lloss) + '">' + (lloss == null ? "-" : lloss.toFixed(1) + "%") + "</b><span>大包丟包</span></div>");
+      }
     }
     var sp = n.speed ? n.speed.speed.filter(function (r) { return r.family === fam; }) : [];
     if (sp.length) {
@@ -111,8 +118,9 @@
     return out.length ? '<div class="stats">' + out.join("") + "</div>" : "";
   }
 
-  function latencyTable(n) {
-    var rows = n.ping ? n.ping.latency.filter(function (r) { return r.family === fam; }) : [];
+  function latencyTable(n, large) {
+    var src = n.ping ? (large ? (n.ping.latencyLarge || []) : n.ping.latency) : [];
+    var rows = src.filter(function (r) { return r.family === fam; });
     if (!rows.length) return "";
     var provs = [], map = {};
     rows.forEach(function (r) {
@@ -125,7 +133,9 @@
       if (!r.recv) return '<td class="bad">不通</td><td class="bad">100%</td>';
       return '<td class="' + latClass(r.avg) + '" title="最小 ' + ms(r.min) + " / 最大 " + ms(r.max) + " / 抖動 " + ms(r.jitter) + '">' + ms(r.avg) + '</td><td class="' + lossClass(r.loss) + '">' + (r.loss < 10 ? r.loss.toFixed(1) : Math.round(r.loss)) + "%</td>";
     };
-    var h = '<div class="tablewrap"><table><thead><tr><th>省份</th><th>電信 ms</th><th>丟包</th><th>聯通 ms</th><th>丟包</th><th>移動 ms</th><th>丟包</th></tr></thead><tbody>';
+    var z = n.ping.largeSize;
+    var h = (large ? '<div class="small" style="margin-top:6px">大包（' + (z ? (z.v4 && z.v6 && z.v4 !== z.v6 ? "IPv4 " + z.v4 + " B／IPv6 " + z.v6 + " B" : (z.v4 || z.v6 || z.wanted) + " B") : "1400 B") + "）回程延遲 / 丟包</div>" : "") +
+      '<div class="tablewrap"><table><thead><tr><th>省份</th><th>電信 ms</th><th>丟包</th><th>聯通 ms</th><th>丟包</th><th>移動 ms</th><th>丟包</th></tr></thead><tbody>';
     provs.forEach(function (p) { h += "<tr><td>" + esc(p) + "</td>" + cell(map[p][0]) + cell(map[p][1]) + cell(map[p][2]) + "</tr>"; });
     return h + "</tbody></table></div>";
   }
@@ -134,9 +144,13 @@
     var rows = n.speed ? n.speed.speed.filter(function (r) { return r.family === fam; }) : [];
     if (!rows.length) return "";
     var mode = n.speed.mode, single = mode !== "multi", multi = mode !== "single";
-    var h = '<div class="tablewrap"><table><thead><tr><th>測速點</th><th>延遲</th>' + (single ? "<th>單線程↓</th><th>單線程↑</th>" : "") + (multi ? "<th>多線程↓</th><th>多線程↑</th>" : "") + "<th>回程重傳</th></tr></thead><tbody>";
+    var lg = rows.some(function (r) { return r.rttLarge != null; });
+    var h = '<div class="tablewrap"><table><thead><tr><th>測速點</th><th>' + (lg ? "大包延遲" : "延遲") + "</th>" + (single ? "<th>單線程↓</th><th>單線程↑</th>" : "") + (multi ? "<th>多線程↓</th><th>多線程↑</th>" : "") + "<th>回程重傳</th></tr></thead><tbody>";
     rows.forEach(function (r) {
-      h += "<tr><td>" + esc(r.prov + (ISP[r.isp] || r.isp)) + '</td><td class="' + latClass(r.rtt) + '">' + ms(r.rtt) + "</td>" +
+      var lc = lg ? (r.rttLarge == null ? '<td class="bad">' + (r.lossLarge === 100 ? "不通" : "-") + "</td>"
+        : '<td class="' + (r.lossLarge > 0 ? lossClass(r.lossLarge) : latClass(r.rttLarge)) + '">' + ms(r.rttLarge) + (r.lossLarge > 0 ? " / " + Math.round(r.lossLarge) + "%" : "") + "</td>")
+        : '<td class="' + latClass(r.rtt) + '">' + ms(r.rtt) + "</td>";
+      h += "<tr><td>" + esc(r.prov + (ISP[r.isp] || r.isp)) + "</td>" + lc +
         (single ? "<td>" + mbps(r.singleDown) + "</td><td>" + mbps(r.singleUp) + "</td>" : "") +
         (multi ? "<td>" + mbps(r.multiDown) + "</td><td>" + mbps(r.multiUp) + "</td>" : "") +
         '<td class="' + pctClass(r.upRetrans) + '">' + pct(r.upRetrans) + (r.rtxSource === "snmp" ? "≈" : "") + "</td></tr>";
@@ -154,7 +168,7 @@
       var times = [];
       if (n.ping) times.push("延遲 " + ago(n.ping.at));
       if (n.speed) times.push("測速 " + ago(n.speed.at) + "（" + esc(n.speed.points || "北上廣") + "）");
-      var body = stats(n) + latencyTable(n) + speedTable(n);
+      var body = stats(n) + latencyTable(n) + latencyTable(n, true) + speedTable(n);
       if (!body) body = '<div class="small">此節點沒有 IPv' + fam + " 結果</div>";
       return '<div class="card"><h2><span class="dot' + (n.online ? " on" : "") + '"></span>' + esc(n.name) + (n.region ? ' <span class="small">' + esc(n.region) + "</span>" : "") + "</h2>" +
         '<div class="meta">' + times.join("｜") + (n.speed && n.speed.exit ? "｜" + esc(n.speed.exit) : "") + "</div>" + body +

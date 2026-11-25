@@ -13,7 +13,7 @@
     "en": "Test China Telecom/Unicom/Mobile IPv4/IPv6 latency and Taier speedtest from your nodes via the Komari agent, from the admin page or an interactive Telegram bot."
   },
   "author": "MbaoWang",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "url": "https://github.com/MbaoWang/komari-speedtest",
   "komari": ">=1.0.5",
   "entry": "script.js",
@@ -322,6 +322,57 @@
           "zh_CN": "逗号分隔",
           "zh-CN": "逗号分隔",
           "en": "Comma separated"
+        }
+      },
+      {
+        "key": "large_enabled",
+        "type": "switch",
+        "default": true,
+        "name": {
+          "zh_TW": "大包回程延遲 / 丟包測試（nping）",
+          "zh_CN": "大包回程延迟 / 丢包测试（nping）",
+          "zh-CN": "大包回程延迟 / 丢包测试（nping）",
+          "en": "Large-packet latency / loss test (nping)"
+        },
+        "help": {
+          "zh_TW": "延遲測試時另外用 nping 送大包（帶資料的 TCP SYN，節點→中國方向）測延遲與丟包；測速表的延遲也改成大包到測速伺服器。需要 root",
+          "zh_CN": "需要 root",
+          "zh-CN": "需要 root",
+          "en": "Requires root on the node"
+        }
+      },
+      {
+        "key": "large_size",
+        "type": "number",
+        "default": 1400,
+        "name": {
+          "zh_TW": "大包大小（位元組，200~1500）",
+          "zh_CN": "大包大小（字节，200~1500）",
+          "zh-CN": "大包大小（字节，200~1500）",
+          "en": "Large packet size (bytes)"
+        },
+        "help": {
+          "zh_TW": "整個 IP 封包的大小；超過節點出口網卡 MTU 時自動降到 MTU",
+          "zh_CN": "超过网卡 MTU 时自动降到 MTU",
+          "zh-CN": "超过网卡 MTU 时自动降到 MTU",
+          "en": "Capped at the egress MTU"
+        }
+      },
+      {
+        "key": "nping_install",
+        "type": "switch",
+        "default": true,
+        "name": {
+          "zh_TW": "節點沒有 nping 時自動安裝（nmap）",
+          "zh_CN": "节点没有 nping 时自动安装（nmap）",
+          "zh-CN": "节点没有 nping 时自动安装（nmap）",
+          "en": "Auto-install nping (nmap) on nodes"
+        },
+        "help": {
+          "zh_TW": "支援 apt / dnf / yum / apk / pacman；關閉時沒有 nping 的節點會略過大包測試",
+          "zh_CN": "关闭时没有 nping 的节点会略过大包测试",
+          "zh-CN": "关闭时没有 nping 的节点会略过大包测试",
+          "en": "If off, nodes without nping skip the large-packet test"
         }
       },
       {

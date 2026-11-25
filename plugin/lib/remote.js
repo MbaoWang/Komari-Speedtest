@@ -157,10 +157,11 @@ function estimateSeconds(opts) {
   var fams = opts.family === "both" ? 2 : 1;
   var t = 30;
   if (opts.ping) t += 90 + Math.ceil((opts.pingCount || 20) * 1.5) * fams;
+  if (opts.ping && opts.large) t += 60 + Math.ceil((opts.pingCount || 20) * 0.2 + 2) * 12 * fams; // 大包：約 12 批（16 個平行）
   if (opts.speed) {
     var points = expandPoints(opts.points || "", opts.isps).length;
     var modes = opts.mode === "both" ? 2 : 1;
-    var perInvoke = 8 + fams * ((2 * (opts.duration || 5) + 6) + 6); // 單線程、多線程各自執行一次
+    var perInvoke = 8 + fams * ((2 * (opts.duration || 5) + 6) + 6 + (opts.large ? 2 : 0)); // 單線程、多線程各自執行一次（大包延遲約 +2 秒）
     t += 120 + points * modes * perInvoke;
     if (opts.retries) t += Math.ceil(points * modes * 0.3) * opts.retries * (perInvoke - 8); // 預估約三成需要重測
   }
@@ -198,6 +199,29 @@ function probeScript(count) {
   ].join("\n");
 }
 
+// 大包探測（參考 TcpQuality「大包回程」）：用 nping 送帶資料的 TCP SYN（整個 IP 封包 SIZE 位元組，
+// 方向是 節點→中國），對方回小的 SYN-ACK / RST。統計延遲與丟包。
+// 參數：協議 省份 運營商 名稱 IP 端口 [次數]；輸出格式與 @@LAT 相同（@@LATL）
+function largeScript(count) {
+  return [
+    "fam=$1; prov=$2; isp=$3; host=$4; ip=$5; port=$6; n=${7:-" + count + "}",
+    '[ -n "$ip" ] || exit 0',
+    'if [ "$fam" = 6 ]; then FF=-6; SZ=$LSIZE6; HD=60; else FF=""; SZ=$LSIZE4; HD=40; fi',
+    "PL=$((SZ - HD))",
+    'out=$(nping $FF --tcp -p "$port" --flags syn --data-length "$PL" -c "$n" --delay 200ms "$ip" 2>&1)',
+    'printf "%s\\n" "$out" | awk -v f="$fam" -v p="$prov" -v s="$isp" -v h="$host" -v n="$n" \'',
+    '  function val(l, k,  i, r) { i = index(l, k); if (!i) return ""; r = substr(l, i + length(k)); sub(/^ */, "", r); sub(/ms.*/, "", r); return (r ~ /^[0-9.]+$/) ? r : "" }',
+    '  /Raw packets sent:/ { for (i = 1; i <= NF; i++) { if ($i == "sent:") sent = $(i + 1); if ($i == "Rcvd:") rcvd = $(i + 1) } }',
+    '  /Avg rtt:/ { mx = val($0, "Max rtt:"); mn = val($0, "Min rtt:"); av = val($0, "Avg rtt:") }',
+    "  END {",
+    '    if (sent == "" || sent + 0 == 0) { printf "@@LATL|%s|%s|%s|%s|%d|0|||||E\\n", f, p, s, h, n; exit }',
+    "    if (rcvd + 0 > sent + 0) rcvd = sent",
+    '    if (rcvd + 0 > 0 && av != "") printf "@@LATL|%s|%s|%s|%s|%d|%d|%.1f|%.1f|%.1f||0\\n", f, p, s, h, sent, rcvd, mn, av, mx',
+    '    else printf "@@LATL|%s|%s|%s|%s|%d|0|||||0\\n", f, p, s, h, sent',
+    "  }\'"
+  ].join("\n");
+}
+
 // 從 ss -tinp 取出泰爾測速程式（comm 會被截成 15 字元 "taierspeedtest-"）每條連線的 TCP_INFO：
 //   key family data_segs_out data_segs_in retrans(總數) rcv_ooopack
 var SS_AWK = [
@@ -232,7 +256,9 @@ function buildRemoteCommand(opts) {
   var custom = parseCustomTargets(opts.customTargets);
   var isps = normIsps(opts.isps);
   var retries = clampInt(opts.retries, 0, 3, 1);
-  var est = estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: duration, pingCount: pingCount, isps: isps, retries: retries });
+  var large = opts.large !== false;
+  var largeSize = clampInt(opts.largeSize, 200, 1500, 1400);
+  var est = estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: duration, pingCount: pingCount, isps: isps, retries: retries, large: opts.large !== false });
   var fams = family === "both" ? "4 6" : family;
 
   var L = [];
@@ -261,6 +287,54 @@ function buildRemoteCommand(opts) {
     'echo "@@IP|4|$ip4"',
     'echo "@@IP|6|$ip6"'
   );
+
+  if (large) {
+    L.push(
+      "# ---------- 大包探測準備（nping，需要 root） ----------",
+      "LARGE=0",
+      'if [ "$(id -u)" != 0 ]; then echo "@@WARN|large|大包測試需要 root 權限（nping 要送原始封包），已略過";',
+      "else",
+      "  if ! command -v nping >/dev/null 2>&1 && [ " + (opts.npingInstall === false ? "0" : "1") + " = 1 ]; then",
+      "    echo \"@@INFO|large|安裝 nping（nmap）中…\"",
+      "    ( export DEBIAN_FRONTEND=noninteractive; TO=''; command -v timeout >/dev/null 2>&1 && TO='timeout 240';",
+      "      if command -v apt-get >/dev/null 2>&1; then $TO apt-get install -y -qq nmap >/dev/null 2>&1 || { $TO apt-get update -qq >/dev/null 2>&1 && $TO apt-get install -y -qq nmap >/dev/null 2>&1; };",
+      "      elif command -v dnf >/dev/null 2>&1; then $TO dnf install -y -q nmap >/dev/null 2>&1;",
+      "      elif command -v yum >/dev/null 2>&1; then $TO yum install -y -q nmap >/dev/null 2>&1;",
+      "      elif command -v apk >/dev/null 2>&1; then $TO apk add -q nmap-nping >/dev/null 2>&1;",
+      "      elif command -v pacman >/dev/null 2>&1; then $TO pacman -S --noconfirm --needed nmap >/dev/null 2>&1; fi ) </dev/null",
+      "  fi",
+      '  if command -v nping >/dev/null 2>&1; then LARGE=1; else echo "@@WARN|large|節點沒有 nping（nmap），已略過大包測試；可手動安裝 nmap，或在插件設定開啟自動安裝"; fi',
+      "fi",
+      // 大包大小不超過出口網卡 MTU（WireGuard / PPPoE 等隧道 MTU 較小，超過會被切開或丟掉）
+      "mtu_of() { d=$(ip -$1 route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i==\"dev\"){print $(i+1); exit}}'); [ -n \"$d\" ] && cat \"/sys/class/net/$d/mtu\" 2>/dev/null; }",
+      "LSIZE4=" + largeSize + "; LSIZE6=" + largeSize,
+      'M4=$(mtu_of 4); M6=$(mtu_of 6)',
+      'if [ -n "$M4" ] && [ "$M4" -lt "$LSIZE4" ] 2>/dev/null; then LSIZE4=$M4; fi',
+      'if [ -n "$M6" ] && [ "$M6" -lt "$LSIZE6" ] 2>/dev/null; then LSIZE6=$M6; fi',
+      'echo "@@LSIZE|$LSIZE4|$LSIZE6|' + largeSize + '"',
+      "export LSIZE4 LSIZE6",
+      "cat > \"$WORK/large.sh\" <<'KCST_LARGE'",
+      largeScript(pingCount),
+      "KCST_LARGE"
+    );
+  }
+
+  var largeStage = [
+'if [ "${LARGE:-0}" = 1 ]; then',
+        // 預檢：對 Cloudflare 送小包與大包；小包通、大包全掉 = 本機或上游會擋帶資料的 SYN，大包結果不可信
+        '  for pf in ' + fams + '; do',
+        '    if [ "$pf" = 6 ]; then PIP=2606:4700:4700::1111; PF=-6; else PIP=1.1.1.1; PF=""; fi',
+        '    PS=$(nping $PF --tcp -p 443 --flags syn -c 3 --delay 200ms "$PIP" 2>&1 | sed -nE "s/.*Rcvd: ([0-9]+).*/\\1/p" | tail -1)',
+        '    PB=$(sh "$WORK/large.sh" "$pf" pre pre pre "$PIP" 443 3 | awk -F"|" "{print \\$7}")',
+        '    if [ "${PS:-0}" -ge 2 ] && [ "${PB:-0}" -eq 0 ]; then echo "@@WARN|large|IPv$pf 大包被本機或上游防火牆擋下（小包正常、大包全掉），已略過 IPv$pf 大包測試"; echo "$pf" >> "$WORK/large.skip"; fi',
+        "  done",
+        '  awk -v skip=" $(cat "$WORK/large.skip" 2>/dev/null | tr "\\n" " ") " "!index(skip, \\" \\" \\$1 \\" \\")" "$WORK/targets" > "$WORK/targets.large"',
+        '  echo "@@LATL_BEGIN"',
+        '  if echo x | xargs -P 2 -n 1 true >/dev/null 2>&1; then xargs -P "$PAR" -L 1 sh "$WORK/large.sh" < "$WORK/targets.large";',
+        '  else while read -r a1 a2 a3 a4 a5 a6; do sh "$WORK/large.sh" "$a1" "$a2" "$a3" "$a4" "$a5" "$a6"; done < "$WORK/targets.large"; fi',
+        '  echo "@@LATL_END"',
+        "fi"
+  ];
 
   if (opts.ping) {
     L.push(
@@ -307,10 +381,15 @@ function buildRemoteCommand(opts) {
       "  wait",
       "fi",
       'echo "@@LAT_END"',
+      // 大包延遲 / 丟包（nping）
+      "@@LARGE_STAGE@@",
       'echo "@@TRAFFIC|latency|$NL0|$(netdev)"',
       "fi"
     );
   }
+
+  var li = L.indexOf("@@LARGE_STAGE@@");
+  if (li >= 0) L.splice.apply(L, [li, 1].concat(large ? largeStage : []));
 
   if (opts.speed) {
     var list = expandPoints(points, isps);
@@ -374,6 +453,13 @@ function buildRemoteCommand(opts) {
       "      done",
       '      cat "$BEST"',
       // 這個測速點（含重測）實際用掉的流量
+      // 測速伺服器的大包延遲 / 丟包：從 ss 取樣取得泰爾測速連到的伺服器 IP:端口（每個協議取連線最多的那個）
+      '      if [ "${LARGE:-0}" = 1 ] && [ "$HAS_SS" = 1 ] && [ "$M" = "' + runModes[0] + '" ] && [ -s "$WORK/ss.log" ]; then',
+      "        awk '{ n = split($1, a, \"_\"); c[$2 \" \" a[n]]++ } END { for (k in c) print c[k], k }' \"$WORK/ss.log\" | sort -rn | awk '!seen[$2]++ { print $2, $3 }' | while read -r sf peer; do",
+      '          case "$peer" in \\[*) sip=${peer#\\[}; sip=${sip%%\\]*}; sport=${peer##*:} ;; *) sip=${peer%:*}; sport=${peer##*:} ;; esac',
+      '          sh "$WORK/large.sh" "$sf" "$P" - srv "$sip" "$sport" 10 | sed "s/^@@LATL|/@@SRVL|/"',
+      "        done",
+      "      fi",
       '      echo "@@TRAFFIC|point|$NP0|$(netdev)|$P|$M"',
       '      if [ "$TRY" -gt 1 ]; then echo "@@RETRY|$P|$((TRY-1))|$BESTF|$M"; fi',
       '      rm -f "$WORK"/try.*',

@@ -70,7 +70,9 @@ function pointsLabel(p) {
 }
 
 // 延遲：每個協議一張「省份 × 三網」表，格內為 平均ms（丟包率>0 時附上 %）
-function latencyTables(latency) {
+// tag：表頭 / 摘要的附加字（例如「大包」）
+function latencyTables(latency, tag) {
+  tag = tag || "";
   var out = [];
   ["4", "6"].forEach(function (fam) {
     var rows = latency.filter(function (r) { return r.family === fam; });
@@ -92,7 +94,7 @@ function latencyTables(latency) {
       return s;
     };
     var lines = [];
-    lines.push(padR("IPv" + fam, 8) + padL("電信", 9) + padL("聯通", 9) + padL("移動", 9));
+    lines.push(padR("IPv" + fam + tag, 8) + padL("電信", 9) + padL("聯通", 9) + padL("移動", 9));
     var all = [];
     provs.forEach(function (p) {
       var c = map[p];
@@ -110,12 +112,12 @@ function latencyTables(latency) {
       var sent = 0, lost = 0, rtx = 0;
       rows.forEach(function (r) { sent += r.sent; lost += r.sent - r.recv; rtx += r.synRetrans || 0; });
       var worst = rows.slice().sort(function (a, b) { return b.loss - a.loss; })[0];
-      summary = "IPv" + fam + "：平均 " + fmtMs(avg) + " ms，整體丟包 " + (sent ? (lost / sent * 100).toFixed(1) : "0") + "%" +
+      summary = "IPv" + fam + (tag ? " " + tag : "") + "：平均 " + fmtMs(avg) + " ms，整體丟包 " + (sent ? (lost / sent * 100).toFixed(1) : "0") + "%" +
         (rtx ? "（握手重傳 " + rtx + " 次）" : "") +
         "，最佳 " + tProv(best.prov) + tIsp(best.isp) + " " + fmtMs(best.avg) + " ms" +
         (worst && worst.loss > 0 ? "，丟包最多 " + tProv(worst.prov) + tIsp(worst.isp) + " " + Math.round(worst.loss) + "%" : "");
     } else {
-      summary = "IPv" + fam + "：全部節點不通";
+      summary = "IPv" + fam + (tag ? " " + tag : "") + "：全部節點不通";
     }
     out.push({ family: fam, table: lines.join("\n"), summary: summary });
   });
@@ -130,19 +132,30 @@ function speedTable(speed, mode) {
     var lines = [];
     var single = mode !== "multi";
     var multi = mode !== "single";
-    var head = padR("IPv" + fam, 11) + padL("延遲", 6);
+    var large = rows.some(function (r) { return r.rttLarge !== undefined && r.rttLarge !== null; });
+    var lw = large ? 10 : 6;
+    var head = padR("IPv" + fam, 11) + padL(large ? "大包延遲" : "延遲", lw);
     if (single) head += padL("單↓", 7) + padL("單↑", 7);
     if (multi) head += padL("多↓", 7) + padL("多↑", 7);
     lines.push(head);
     rows.forEach(function (r) {
-      var l = padR(tProv(r.prov) + tIsp(r.isp), 11) + padL(fmtMs(r.rtt), 6);
+      var lat = large ? (r.rttLarge === undefined || r.rttLarge === null ? (r.lossLarge === 100 ? "×" : "-") : fmtMs(r.rttLarge) + (r.lossLarge > 0 ? "/" + Math.round(r.lossLarge) + "%" : "")) : fmtMs(r.rtt);
+      var l = padR(tProv(r.prov) + tIsp(r.isp), 11) + padL(lat, lw);
       if (single) l += padL(fmtMbps(r.singleDown), 7) + padL(fmtMbps(r.singleUp), 7);
       if (multi) l += padL(fmtMbps(r.multiDown), 7) + padL(fmtMbps(r.multiUp), 7);
       lines.push(l);
     });
-    out.push({ family: fam, table: lines.join("\n") });
+    out.push({ family: fam, table: lines.join("\n"), large: large });
   });
   return out;
+}
+
+// 大包大小說明，例如「1400 B」；IPv4 / IPv6 因 MTU 不同時分開列
+function largeSizeLabel(r) {
+  var z = r && r.largeSize;
+  if (!z) return "1400 B";
+  if (z.v4 && z.v6 && z.v4 !== z.v6) return "IPv4 " + z.v4 + " B／IPv6 " + z.v6 + " B";
+  return (z.v4 || z.v6 || z.wanted) + " B";
 }
 
 function fmtPct(v) {
@@ -187,10 +200,17 @@ function nodeResultHTML(job, nodeName, r, opts) {
     lt.forEach(function (t) { parts.push("<pre>" + esc(t.table) + "</pre>"); });
     lt.forEach(function (t) { parts.push("• " + esc(t.summary)); });
   }
+  if (r.latencyLarge && r.latencyLarge.length) {
+    var ll = latencyTables(r.latencyLarge, "大包");
+    parts.push("\n<b>🧱 大包（" + esc(largeSizeLabel(r)) + "）回程延遲 / 丟包</b>");
+    ll.forEach(function (t) { parts.push("<pre>" + esc(t.table) + "</pre>"); });
+    ll.forEach(function (t) { parts.push("• " + esc(t.summary)); });
+  }
   if (r.speed.length) {
     parts.push("\n<b>🚀 泰爾測速（Mbps）</b>");
-    speedTable(r.speed, job.mode).forEach(function (t) { parts.push("<pre>" + esc(t.table) + "</pre>"); });
-    parts.push("↓ 去程（中國→節點）　↑ 回程（節點→中國）");
+    var sts = speedTable(r.speed, job.mode);
+    sts.forEach(function (t) { parts.push("<pre>" + esc(t.table) + "</pre>"); });
+    parts.push("↓ 去程（中國→節點）　↑ 回程（節點→中國）" + (sts.some(function (t) { return t.large; }) ? "\n大包延遲＝" + esc(largeSizeLabel(r)) + " 的封包到測速伺服器" : ""));
     var rt = retransTable(r.speed);
     if (rt) {
       parts.push("<b>🔁 回程 TCP 重傳率（測速期間，節點→中國）</b>");
@@ -215,6 +235,7 @@ function shortSummaryHTML(job, nodeName, r) {
   parts.push(meta);
   if (!r) { parts.push("⚠️ 沒有收到節點回傳結果"); return parts.join("\n"); }
   if (r.latency && r.latency.length) latencyTables(r.latency).forEach(function (t) { parts.push("📶 " + esc(t.summary)); });
+  if (r.latencyLarge && r.latencyLarge.length) latencyTables(r.latencyLarge, "大包").forEach(function (t) { parts.push("🧱 " + esc(t.summary)); });
   ["4", "6"].forEach(function (fam) {
     var rows = (r.speed || []).filter(function (s) { return s.family === fam; });
     if (!rows.length) return;
@@ -277,6 +298,6 @@ function splitMessage(html, limit) {
 
 module.exports = {
   esc: esc, tIsp: tIsp, tProv: tProv, fmtMs: fmtMs, fmtMbps: fmtMbps, fmtTime: fmtTime,
-  typeLabel: typeLabel, fmtBytes: fmtBytes, trafficText: trafficText, ispsLabel: ispsLabel, retryNote: retryNote, familyLabel: familyLabel, modeLabel: modeLabel, pointsLabel: pointsLabel,
+  typeLabel: typeLabel, largeSizeLabel: largeSizeLabel, fmtBytes: fmtBytes, trafficText: trafficText, ispsLabel: ispsLabel, retryNote: retryNote, familyLabel: familyLabel, modeLabel: modeLabel, pointsLabel: pointsLabel,
   latencyTables: latencyTables, speedTable: speedTable, retransTable: retransTable, fmtPct: fmtPct, shortSummaryHTML: shortSummaryHTML, nodeResultHTML: nodeResultHTML, splitMessage: splitMessage
 };
