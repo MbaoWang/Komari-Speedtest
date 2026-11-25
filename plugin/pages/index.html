@@ -42,7 +42,27 @@
   th, td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
   th:first-child, td:first-child { text-align: left; }
   th { color: var(--muted); font-weight: 600; font-size: 12px; }
-  .tablewrap { overflow-x: auto; margin-bottom: 12px; }
+  .tablewrap { overflow-x: auto; margin-bottom: 12px; max-width: 760px; }
+  .lat-panel { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 14px; max-width: 760px; background: var(--card); }
+  .lat-panel.narrow { max-width: 480px; }
+  .lat-panel .tablewrap { margin-bottom: 0; max-width: none; }
+  .lat-panel table th, .lat-panel table td { padding: 5px 10px; }
+  .lat-panel tbody tr:hover { background: var(--chip); }
+  .lat-panel th.grp { text-align: center; background: var(--chip); font-size: 12px; }
+  .lat-panel th.lg, .lat-panel td.lg { background: rgba(148, 163, 184, 0.08); }
+  .lat-panel th.grp.lg { background: rgba(37, 99, 235, 0.09); color: var(--text); }
+  .lat-panel .sep { border-right: 1px solid var(--line); }
+  .panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--chip); }
+  .panel-title { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 13px; }
+  .fam-tag { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 6px; background: var(--accent); color: var(--on-accent); }
+  .fam-tag.v6 { background: #7c3aed; color: #fff; }
+  .panel-kpis { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .kpi { padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--muted); }
+  .kpi b { font-weight: 600; }
+  .panel-foot { padding: 6px 12px; border-top: 1px solid var(--line); background: var(--chip); font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
+  .fam-bar { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .fam-bar button { border: 1px solid var(--line); background: var(--chip); color: var(--text); padding: 3px 10px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 12px; }
+  .fam-bar button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .good { color: var(--good); } .mid { color: var(--mid); } .bad { color: var(--bad); }
   .job { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
   .job:last-child { border-bottom: 0; }
@@ -55,7 +75,7 @@
   .kv { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--muted); margin-bottom: 10px; }
   .empty { color: var(--muted); padding: 20px 0; text-align: center; }
   pre.cmd { max-height: 300px; overflow: auto; background: var(--chip); padding: 10px; border-radius: 8px; font-size: 12px; }
-  .imgbox { margin: 4px 0 14px; }
+  .imgbox { margin: 4px 0 14px; max-width: 760px; }
   .imgbox img { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; display: block; margin-bottom: 4px; }
   .imgbox a { color: var(--accent); }
   .cardhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
@@ -243,31 +263,94 @@
     }).join("");
   }
 
-  function latencyHTML(lat, title) {
-    var html = "";
-    ["4", "6"].forEach(function (fam) {
-      var rows = lat.filter(function (r) { return r.family === fam; });
-      if (!rows.length) return;
-      var provs = [], map = {}, others = [];
-      rows.forEach(function (r) {
-        var c = ispCol(r.isp);
-        if (c > 2) { others.push(r); return; }
-        if (!map[r.prov]) { map[r.prov] = [null, null, null]; provs.push(r.prov); }
-        if (!map[r.prov][c] || (r.avg != null && (map[r.prov][c].avg == null || r.avg < map[r.prov][c].avg))) map[r.prov][c] = r;
-      });
-      var cell = function (r) {
-        if (!r) return "<td>-</td>";
-        if (!r.recv) return '<td class="bad">×</td>';
-        return '<td class="' + latClass(r.avg) + '" title="' + esc(r.host) + (r.sameAs ? "\n與 " + esc(tRegion(r.sameAs)) + " 共用同一節點" : "") + "\n最小 " + ms(r.min) + " / 最大 " + ms(r.max) + " / 抖動 " + ms(r.jitter) + "\n發送 " + r.sent + "，成功 " + r.recv + "，握手重傳 " + (r.synRetrans || 0) + "，失敗 " + (r.fail != null ? r.fail : r.sent - r.recv) + '">' + ms(r.avg) + (r.sameAs ? "<sup>*</sup>" : "") + (r.loss > 0 ? ' <span class="' + (r.loss >= 10 ? "bad" : "mid") + ' small">' + (r.loss < 10 ? r.loss.toFixed(1) : Math.round(r.loss)) + "%</span>" : "") + "</td>";
-      };
-      html += '<div class="tablewrap"><table><thead><tr><th>IPv' + fam + " " + (title || "延遲 (ms) / 丟包") + '</th><th>電信</th><th>聯通</th><th>移動</th></tr></thead><tbody>';
-      provs.forEach(function (p) { html += "<tr><td>" + esc(tProv(p)) + "</td>" + cell(map[p][0]) + cell(map[p][1]) + cell(map[p][2]) + "</tr>"; });
-      others.forEach(function (r) { html += "<tr><td>" + esc(tProv(r.prov) + " " + (ISP[r.isp] || r.isp)) + "</td>" + cell(r) + "<td></td><td></td></tr>"; });
-      html += "</tbody></table></div>";
-      var sh = rows.filter(function (r) { return r.sameAs; }).map(function (r) { return tProv(r.prov) + (ISP[r.isp] || r.isp) + "＝" + tRegion(r.sameAs); });
-      if (sh.length && !title) html += '<div class="small" style="margin:-6px 0 10px">* 共用同一節點（Zstatic 在該省沒有獨立節點）：' + esc(sh.join("、")) + "</div>";
+  function largeLabelFor(z, fam) {
+    if (!z) return "1400 B";
+    if (fam === "4") return (z.v4 || z.wanted || 1400) + " B";
+    if (fam === "6") return (z.v6 || z.wanted || 1400) + " B";
+    return largeLabel(z);
+  }
+  function lossCls(v) { return v == null ? "" : v <= 0 ? "good" : v < 5 ? "mid" : "bad"; }
+  function latKpi(rows, label) {
+    var ok = rows.filter(function (r) { return r.recv > 0 && r.avg != null; });
+    var sent = 0, lost = 0;
+    rows.forEach(function (r) { sent += r.sent || 0; lost += (r.sent || 0) - (r.recv || 0); });
+    var loss = sent ? lost / sent * 100 : null;
+    if (!ok.length) return { html: '<span class="kpi">' + label + ' <b class="bad">全部不通</b></span>', best: "" };
+    var avgV = ok.reduce(function (s, r) { return s + r.avg; }, 0) / ok.length;
+    var best = ok.slice().sort(function (a, b) { return a.avg - b.avg; })[0];
+    return {
+      html: '<span class="kpi">' + label + '均延 <b class="' + latClass(avgV) + '">' + ms(avgV) + ' ms</b>・丟包 <b class="' + lossCls(loss) + '">' + (loss == null ? "-" : loss.toFixed(1) + "%") + "</b></span>",
+      best: label + " " + tProv(best.prov) + (ISP[best.isp] || best.isp) + " " + ms(best.avg) + " ms"
+    };
+  }
+  function groupLat(rows) {
+    var provs = [], map = {}, others = [];
+    rows.forEach(function (r) {
+      var c = ispCol(r.isp);
+      if (c > 2) { others.push(r); return; }
+      if (!map[r.prov]) { map[r.prov] = [null, null, null]; provs.push(r.prov); }
+      if (!map[r.prov][c] || (r.avg != null && (map[r.prov][c].avg == null || r.avg < map[r.prov][c].avg))) map[r.prov][c] = r;
     });
-    return html;
+    return { provs: provs, map: map, others: others };
+  }
+  function latCell(r, extraCls) {
+    var cls = extraCls ? " " + extraCls : "";
+    if (!r) return '<td class="' + cls.trim() + '">-</td>';
+    if (!r.recv) return '<td class="bad' + cls + '">×</td>';
+    return '<td class="' + latClass(r.avg) + cls + '" title="' + esc(r.host) + (r.sameAs ? "\n與 " + esc(tRegion(r.sameAs)) + " 共用同一節點" : "") + "\n最小 " + ms(r.min) + " / 最大 " + ms(r.max) + " / 抖動 " + ms(r.jitter) + "\n發送 " + r.sent + "，成功 " + r.recv + "，握手重傳 " + (r.synRetrans || 0) + "，失敗 " + (r.fail != null ? r.fail : r.sent - r.recv) + '">' + ms(r.avg) + (r.sameAs ? "<sup>*</sup>" : "") + (r.loss > 0 ? ' <span class="' + (r.loss >= 10 ? "bad" : "mid") + ' small">' + (r.loss < 10 ? r.loss.toFixed(1) : Math.round(r.loss)) + "%</span>" : "") + "</td>";
+  }
+
+  function latencyPanelsHTML(lat, latLarge, largeSize) {
+    var panels = [];
+    ["4", "6"].forEach(function (fam) {
+      var sRows = (lat || []).filter(function (r) { return r.family === fam; });
+      var lRows = (latLarge || []).filter(function (r) { return r.family === fam; });
+      if (!sRows.length && !lRows.length) return;
+      var dual = sRows.length > 0 && lRows.length > 0;
+      var lsz = largeLabelFor(largeSize, fam);
+      var kpis = [], bests = [];
+      if (sRows.length) { var ks = latKpi(sRows, "標準"); kpis.push(ks.html); if (ks.best) bests.push(ks.best); }
+      if (lRows.length) { var kl = latKpi(lRows, "大包"); kpis.push(kl.html); if (kl.best) bests.push(kl.best); }
+      var h = '<div class="lat-panel' + (dual ? "" : " narrow") + '" data-lat-fam="' + fam + '">';
+      h += '<div class="panel-head"><div class="panel-title"><span class="fam-tag' + (fam === "6" ? " v6" : "") + '">IPv' + fam + "</span><span>" + (dual ? "三網延遲 / 丟包（標準 ＋ " + esc(lsz) + " 大包）" : (lRows.length ? "大包（" + esc(lsz) + "）回程延遲 / 丟包" : "三網延遲 / 丟包")) + '</span></div><div class="panel-kpis">' + kpis.join("") + "</div></div>";
+      h += '<div class="tablewrap"><table>';
+      if (dual) {
+        var sg = groupLat(sRows), lg = groupLat(lRows);
+        var provs = sg.provs.slice();
+        lg.provs.forEach(function (p) { if (provs.indexOf(p) < 0) provs.push(p); });
+        h += '<thead><tr><th rowspan="2" class="sep">省份</th><th colspan="3" class="grp sep">標準（TCP 握手）</th><th colspan="3" class="grp lg">大包回程（' + esc(lsz) + '）</th></tr><tr><th>電信</th><th>聯通</th><th class="sep">移動</th><th class="lg">電信</th><th class="lg">聯通</th><th class="lg">移動</th></tr></thead><tbody>';
+        provs.forEach(function (p) {
+          var sc = sg.map[p] || [null, null, null], lc = lg.map[p] || [null, null, null];
+          h += '<tr><td class="sep">' + esc(tProv(p)) + "</td>" + latCell(sc[0]) + latCell(sc[1]) + latCell(sc[2], "sep") + latCell(lc[0], "lg") + latCell(lc[1], "lg") + latCell(lc[2], "lg") + "</tr>";
+        });
+        var oKeys = [], oS = {}, oL = {};
+        sg.others.forEach(function (r) { var k = r.prov + "|" + r.isp; if (!oS[k]) { oS[k] = r; oKeys.push(k); } });
+        lg.others.forEach(function (r) { var k = r.prov + "|" + r.isp; if (!oL[k]) { oL[k] = r; if (oKeys.indexOf(k) < 0) oKeys.push(k); } });
+        oKeys.forEach(function (k) {
+          var r = oS[k] || oL[k];
+          h += '<tr><td class="sep">' + esc(tProv(r.prov) + " " + (ISP[r.isp] || r.isp)) + "</td>" + latCell(oS[k]) + '<td></td><td class="sep"></td>' + latCell(oL[k], "lg") + '<td class="lg"></td><td class="lg"></td></tr>';
+        });
+      } else {
+        var onlyRows = sRows.length ? sRows : lRows;
+        var g = groupLat(onlyRows);
+        h += '<thead><tr><th class="sep">省份</th><th>電信</th><th>聯通</th><th>移動</th></tr></thead><tbody>';
+        g.provs.forEach(function (p) { h += '<tr><td class="sep">' + esc(tProv(p)) + "</td>" + latCell(g.map[p][0]) + latCell(g.map[p][1]) + latCell(g.map[p][2]) + "</tr>"; });
+        g.others.forEach(function (r) { h += '<tr><td class="sep">' + esc(tProv(r.prov) + " " + (ISP[r.isp] || r.isp)) + "</td>" + latCell(r) + "<td></td><td></td></tr>"; });
+      }
+      h += "</tbody></table></div>";
+      var sh = sRows.filter(function (r) { return r.sameAs; }).map(function (r) { return tProv(r.prov) + (ISP[r.isp] || r.isp) + "＝" + tRegion(r.sameAs); });
+      var footLeft = sh.length ? "* 共用節點：" + esc(sh.join("、")) : "單位：ms（有丟包時右側標示丟包率）";
+      var footRight = bests.length ? "最佳：" + esc(bests.join(" ｜ ")) : "";
+      h += '<div class="panel-foot"><span>' + footLeft + "</span>" + (footRight ? "<span>" + footRight + "</span>" : "") + "</div></div>";
+      panels.push({ fam: fam, html: h });
+    });
+    if (!panels.length) return "";
+    var out = '<div class="lat-group">';
+    if (panels.length > 1) {
+      out += '<div class="fam-bar"><button data-lf="both" class="on">全部（IPv4 + IPv6）</button><button data-lf="4">只看 IPv4</button><button data-lf="6">只看 IPv6</button></div>';
+    }
+    panels.forEach(function (p) { out += p.html; });
+    return out + "</div>";
   }
 
   function speedHTML(sp, mode) {
@@ -316,9 +399,8 @@
     if (r.ip6) h += "<span>IPv6 出口：" + esc(maskIp(r.ip6)) + "</span>";
     if (r.exit) h += "<span>泰爾識別：" + esc(r.exit) + "</span>";
     h += "</div>";
-    if (r.latency && r.latency.length) h += latencyHTML(r.latency);
+    if ((r.latency && r.latency.length) || (r.latencyLarge && r.latencyLarge.length)) h += latencyPanelsHTML(r.latency, r.latencyLarge, r.largeSize);
     if (r.nodeLists && r.nodeLists.length) h += '<div class="small" style="margin:-6px 0 10px">節點清單：' + esc(r.nodeLists.map(function (x) { return x.scope + " " + x.count + " 個" + (x.http !== "200" ? "（HTTP " + x.http + "）" : ""); }).join("、")) + "</div>";
-    if (r.latencyLarge && r.latencyLarge.length) h += latencyHTML(r.latencyLarge, "大包（" + largeLabel(r.largeSize) + "）回程延遲 / 丟包");
     if (r.speed && r.speed.length) h += speedHTML(r.speed, mode);
     if (r.traffic && r.traffic.total) {
       var t = r.traffic.total, sp = r.traffic.speed, lt = r.traffic.latency;
@@ -510,6 +592,16 @@
   $("tgtest").onclick = function () {
     api("POST", "/telegram/test").then(function (d) { showMsg("已傳送測試訊息到 " + d.chat + "（@" + d.bot + "）"); }).catch(function (e) { showMsg(e.message, true); });
   };
+
+  $("result").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-lf]"); if (!b) return;
+    var grp = b.closest(".lat-group"); if (!grp) return;
+    var f = b.getAttribute("data-lf");
+    Array.prototype.forEach.call(grp.querySelectorAll("button[data-lf]"), function (x) { x.classList.toggle("on", x === b); });
+    Array.prototype.forEach.call(grp.querySelectorAll(".lat-panel[data-lat-fam]"), function (p) {
+      p.style.display = (f === "both" || p.getAttribute("data-lat-fam") === f) ? "" : "none";
+    });
+  });
 
   refresh();
 })();

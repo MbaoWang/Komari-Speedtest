@@ -154,10 +154,12 @@ function speedTable(speed, mode) {
   return out;
 }
 
-// 大包大小說明，例如「1400 B」；IPv4 / IPv6 因 MTU 不同時分開列
-function largeSizeLabel(r) {
+// 大包大小說明，例如「1400 B」；指定協議時回傳該協議的大小，否則 IPv4 / IPv6 不同時分開列
+function largeSizeLabel(r, fam) {
   var z = r && r.largeSize;
   if (!z) return "1400 B";
+  if (fam === "4") return (z.v4 || z.wanted || 1400) + " B";
+  if (fam === "6") return (z.v6 || z.wanted || 1400) + " B";
   if (z.v4 && z.v6 && z.v4 !== z.v6) return "IPv4 " + z.v4 + " B／IPv6 " + z.v6 + " B";
   return (z.v4 || z.v6 || z.wanted) + " B";
 }
@@ -198,19 +200,27 @@ function nodeResultHTML(job, nodeName, r, opts) {
     parts.push("\n⚠️ 沒有收到節點回傳結果");
     return parts.join("\n");
   }
-  if (r.latency.length) {
-    var lt = latencyTables(r.latency);
-    parts.push("\n<b>📶 三網 TCP 延遲 / 丟包（ms，平均/丟包率）</b>");
-    lt.forEach(function (t) { parts.push("<pre>" + esc(t.table) + "</pre>"); });
-    lt.forEach(function (t) { parts.push("• " + esc(t.summary)); });
-    lt.forEach(function (t) { if (t.note) parts.push(esc(t.note)); });
-    if (r.nodeLists && r.nodeLists.length) parts.push(esc("節點清單：" + r.nodeLists.map(function (x) { return x.scope + " " + x.count + " 個" + (x.http !== "200" ? "（HTTP " + x.http + "）" : ""); }).join("、")));
-  }
-  if (r.latencyLarge && r.latencyLarge.length) {
-    var ll = latencyTables(r.latencyLarge, "大包");
-    parts.push("\n<b>🧱 大包（" + esc(largeSizeLabel(r)) + "）回程延遲 / 丟包</b>");
-    ll.forEach(function (t) { parts.push("<pre>" + esc(t.table) + "</pre>"); });
-    ll.forEach(function (t) { parts.push("• " + esc(t.summary)); });
+  var ltMap = {}, llMap = {};
+  if (r.latency && r.latency.length) latencyTables(r.latency).forEach(function (t) { ltMap[t.family] = t; });
+  if (r.latencyLarge && r.latencyLarge.length) latencyTables(r.latencyLarge, "大包").forEach(function (t) { llMap[t.family] = t; });
+  // 依協議分組：IPv4 標準＋大包 → IPv6 標準＋大包，方便對照且切段時自然分開
+  ["4", "6"].forEach(function (fam) {
+    var t = ltMap[fam], tl = llMap[fam];
+    if (!t && !tl) return;
+    if (t) {
+      parts.push("\n<b>📶 IPv" + fam + " 三網 TCP 延遲 / 丟包（ms，平均/丟包率）</b>");
+      parts.push("<pre>" + esc(t.table) + "</pre>");
+      parts.push("• " + esc(t.summary));
+      if (t.note) parts.push(esc(t.note));
+    }
+    if (tl) {
+      parts.push("\n<b>🧱 IPv" + fam + " 大包（" + esc(largeSizeLabel(r, fam)) + "）回程延遲 / 丟包</b>");
+      parts.push("<pre>" + esc(tl.table) + "</pre>");
+      parts.push("• " + esc(tl.summary));
+    }
+  });
+  if ((r.latency && r.latency.length) && r.nodeLists && r.nodeLists.length) {
+    parts.push(esc("節點清單：" + r.nodeLists.map(function (x) { return x.scope + " " + x.count + " 個" + (x.http !== "200" ? "（HTTP " + x.http + "）" : ""); }).join("、")));
   }
   if (r.speed.length) {
     parts.push("\n<b>🚀 泰爾測速（Mbps）</b>");
@@ -241,8 +251,13 @@ function shortSummaryHTML(job, nodeName, r) {
   if (job.type !== "ping") meta += "｜" + esc(pointsLabel(job.points)) + "｜" + modeLabel(job.mode);
   parts.push(meta);
   if (!r) { parts.push("⚠️ 沒有收到節點回傳結果"); return parts.join("\n"); }
-  if (r.latency && r.latency.length) latencyTables(r.latency).forEach(function (t) { parts.push("📶 " + esc(t.summary)); });
-  if (r.latencyLarge && r.latencyLarge.length) latencyTables(r.latencyLarge, "大包").forEach(function (t) { parts.push("🧱 " + esc(t.summary)); });
+  var ltMap = {}, llMap = {};
+  if (r.latency && r.latency.length) latencyTables(r.latency).forEach(function (t) { ltMap[t.family] = t; });
+  if (r.latencyLarge && r.latencyLarge.length) latencyTables(r.latencyLarge, "大包").forEach(function (t) { llMap[t.family] = t; });
+  ["4", "6"].forEach(function (fam) {
+    if (ltMap[fam]) parts.push("📶 " + esc(ltMap[fam].summary));
+    if (llMap[fam]) parts.push("🧱 " + esc(llMap[fam].summary));
+  });
   ["4", "6"].forEach(function (fam) {
     var rows = (r.speed || []).filter(function (s) { return s.family === fam; });
     if (!rows.length) return;

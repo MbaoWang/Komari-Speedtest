@@ -484,3 +484,46 @@ test("script.js：定時排程邊界（peak_start === peak_end、跨午夜）與
   assert.strictEqual(queryParam({ url: "/api/plugin/cn-speedtest/image?file=a%20b.png" }, "file"), "a b.png");
 });
 
+test("延遲分組：Telegram（v4+v4大包 → v6+v6大包）與 PNG 合併表", () => {
+  const zlib = require("zlib");
+  const render = require("../plugin/lib/render.js");
+  const r = {
+    ip4: "198.44.1.2", ip6: "2602:f506::1", largeSize: { v4: 1400, v6: 1280, wanted: 1400 },
+    latency: [
+      { family: "4", prov: "北京", isp: "电信", host: "a", sent: 20, recv: 20, loss: 0, min: 40, avg: 45, max: 50, jitter: 2 },
+      { family: "6", prov: "北京", isp: "电信", host: "b", sent: 20, recv: 20, loss: 0, min: 44, avg: 49, max: 54, jitter: 2 }
+    ],
+    latencyLarge: [
+      { family: "4", prov: "北京", isp: "电信", host: "a", sent: 20, recv: 18, loss: 10, min: 42, avg: 48, max: 55, jitter: 3 },
+      { family: "6", prov: "北京", isp: "电信", host: "b", sent: 20, recv: 20, loss: 0, min: 46, avg: 52, max: 58, jitter: 3 }
+    ],
+    speed: [], errors: [], warnings: []
+  };
+  const job = { type: "ping", family: "both", isps: [], startedAt: "2026-01-01T00:00:00Z", finishedAt: "2026-01-01T00:00:30Z" };
+  const html = fmt.nodeResultHTML(job, "HK-1", r, {});
+  const i4s = html.indexOf("IPv4 三網 TCP 延遲");
+  const i4l = html.indexOf("IPv4 大包（1400 B）");
+  const i6s = html.indexOf("IPv6 三網 TCP 延遲");
+  const i6l = html.indexOf("IPv6 大包（1280 B）");
+  assert.ok(i4s > 0 && i4s < i4l && i4l < i6s && i6s < i6l, "順序應為 v4標準 → v4大包 → v6標準 → v6大包");
+
+  const cap = fmt.shortSummaryHTML(job, "HK-1", r);
+  const c4s = cap.indexOf("📶 IPv4：");
+  const c4l = cap.indexOf("🧱 IPv4 大包：");
+  const c6s = cap.indexOf("📶 IPv6：");
+  const c6l = cap.indexOf("🧱 IPv6 大包：");
+  assert.ok(c4s > 0 && c4s < c4l && c4l < c6s && c6s < c6l, "摘要順序應為 v4標準 → v4大包 → v6標準 → v6大包");
+
+  const png = Buffer.from(render.renderResult(job, "HK-1", r, {}));
+  const width = png.readUInt32BE(16), height = png.readUInt32BE(20);
+  assert.strictEqual(width, 1000);
+  let off = 8, idat = [];
+  while (off < png.length) {
+    const len = png.readUInt32BE(off), type = png.toString("ascii", off + 4, off + 8);
+    if (type === "IDAT") idat.push(png.subarray(off + 8, off + 8 + len));
+    off += 12 + len;
+  }
+  assert.strictEqual(zlib.inflateSync(Buffer.concat(idat)).length, (width + 1) * height);
+});
+
+

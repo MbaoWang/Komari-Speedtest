@@ -156,7 +156,8 @@ Canvas.prototype.toPNG = function () { return png.encodeIndexed(this.w, this.h, 
 
 var C = {
   bg: "#ffffff", head: "#1e3a8a", headText: "#ffffff", headSub: "#c7d2fe", text: "#0f172a", sub: "#64748b",
-  line: "#e2e8f0", zebra: "#f8fafc", section: "#1e40af", thBg: "#eef2ff", good: "#16a34a", mid: "#d97706", bad: "#dc2626", none: "#94a3b8"
+  line: "#e2e8f0", zebra: "#f8fafc", section: "#1e40af", thBg: "#eef2ff", thBgL: "#e0e7ff",
+  largeBg: "#f8fafc", largeZebra: "#f1f5f9", good: "#16a34a", mid: "#d97706", bad: "#dc2626", none: "#94a3b8"
 };
 var W = 1000, PAD = 28, ROW = 32, FH = 24;
 
@@ -165,22 +166,46 @@ function pctColor(v) { return v === null || v === undefined ? C.none : v < 1 ? C
 function lossColor(v) { return v === null || v === undefined ? C.none : v <= 0 ? C.good : v < 5 ? C.mid : C.bad; }
 function pctText(v) { return v === null || v === undefined ? "-" : (v < 10 ? v.toFixed(2) : v.toFixed(1)) + "%"; }
 
-function latencyBlocks(latency, tag) {
+function groupLatRows(rows) {
+  var provs = [], map = {}, others = [];
+  rows.forEach(function (r) {
+    var col = parser.ispOrder(r.isp);
+    if (col > 2) { others.push(r); return; }
+    if (!map[r.prov]) { map[r.prov] = [null, null, null]; provs.push(r.prov); }
+    if (!map[r.prov][col] || (r.avg !== null && (map[r.prov][col].avg === null || r.avg < map[r.prov][col].avg))) map[r.prov][col] = r;
+  });
+  return { provs: provs, map: map, others: others };
+}
+
+function latencyBlocks(latency, latencyLarge) {
   var out = [];
   ["4", "6"].forEach(function (fam) {
-    var rows = latency.filter(function (r) { return r.family === fam; });
-    if (!rows.length) return;
-    var provs = [], map = {}, others = [];
-    rows.forEach(function (r) {
-      var col = parser.ispOrder(r.isp);
-      if (col > 2) { others.push(r); return; }
-      if (!map[r.prov]) { map[r.prov] = [null, null, null]; provs.push(r.prov); }
-      if (!map[r.prov][col] || (r.avg !== null && (map[r.prov][col].avg === null || r.avg < map[r.prov][col].avg))) map[r.prov][col] = r;
-    });
-    var lines = provs.map(function (p) { return { label: fmt.tProv(p), cells: map[p] }; });
-    others.forEach(function (r) { lines.push({ label: fmt.tProv(r.prov) + fmt.tIsp(r.isp), cells: [r, null, null] }); });
-    var t = fmt.latencyTables(rows, tag)[0];
-    out.push({ family: fam, lines: lines, summary: t ? t.summary : "", note: t && !tag ? t.note : "", count: rows[0].sent, large: Boolean(tag) });
+    var sRows = (latency || []).filter(function (r) { return r.family === fam; });
+    var lRows = (latencyLarge || []).filter(function (r) { return r.family === fam; });
+    if (!sRows.length && !lRows.length) return;
+    if (sRows.length && lRows.length) {
+      var sg = groupLatRows(sRows), lg = groupLatRows(lRows);
+      var provs = sg.provs.slice();
+      lg.provs.forEach(function (p) { if (provs.indexOf(p) < 0) provs.push(p); });
+      var lines = provs.map(function (p) { return { label: fmt.tProv(p), sCells: sg.map[p] || [null, null, null], lCells: lg.map[p] || [null, null, null] }; });
+      var oKeys = [], oS = {}, oL = {};
+      sg.others.forEach(function (r) { var k = r.prov + "|" + r.isp; if (!oS[k]) { oS[k] = r; oKeys.push(k); } });
+      lg.others.forEach(function (r) { var k = r.prov + "|" + r.isp; if (!oL[k]) { oL[k] = r; if (oKeys.indexOf(k) < 0) oKeys.push(k); } });
+      oKeys.forEach(function (k) {
+        var r = oS[k] || oL[k];
+        lines.push({ label: fmt.tProv(r.prov) + fmt.tIsp(r.isp), sCells: [oS[k] || null, null, null], lCells: [oL[k] || null, null, null] });
+      });
+      var tS = fmt.latencyTables(sRows)[0], tL = fmt.latencyTables(lRows, "大包")[0];
+      out.push({ family: fam, dual: true, lines: lines, summary: tS ? tS.summary : "", largeSummary: tL ? tL.summary : "", note: tS ? tS.note : "", count: sRows[0].sent, largeCount: lRows[0].sent });
+      return;
+    }
+    var isLarge = !sRows.length;
+    var rows = isLarge ? lRows : sRows;
+    var g = groupLatRows(rows);
+    var singleLines = g.provs.map(function (p) { return { label: fmt.tProv(p), cells: g.map[p] }; });
+    g.others.forEach(function (r) { singleLines.push({ label: fmt.tProv(r.prov) + fmt.tIsp(r.isp), cells: [r, null, null] }); });
+    var t = fmt.latencyTables(rows, isLarge ? "大包" : "")[0];
+    out.push({ family: fam, dual: false, large: isLarge, lines: singleLines, summary: t ? t.summary : "", note: t && !isLarge ? t.note : "", count: rows[0].sent });
   });
   return out;
 }
@@ -188,8 +213,7 @@ function latencyBlocks(latency, tag) {
 // job: {type,family,points,mode,startedAt,finishedAt}；r: parser 結果
 function renderResult(job, nodeName, r, opts) {
   opts = opts || {};
-  var lat = r && r.latency ? latencyBlocks(r.latency) : [];
-  if (r && r.latencyLarge && r.latencyLarge.length) lat = lat.concat(latencyBlocks(r.latencyLarge, "大包"));
+  var lat = r ? latencyBlocks(r.latency, r.latencyLarge) : [];
   var speed = r && r.speed ? r.speed : [];
   var single = job.mode !== "multi", multi = job.mode !== "single";
   var fams = ["4", "6"].filter(function (f) { return speed.some(function (s) { return s.family === f; }); });
@@ -210,7 +234,11 @@ function renderResult(job, nodeName, r, opts) {
     });
     b.noteLines.push(line);
   });
-  lat.forEach(function (b) { h += 44 + ROW + b.lines.length * ROW + 40 + b.noteLines.length * 28; });
+  lat.forEach(function (b) {
+    var headH = b.dual ? 60 : ROW;
+    var sumH = b.dual ? 68 : 40;
+    h += 44 + headH + b.lines.length * ROW + sumH + b.noteLines.length * 28;
+  });
   fams.forEach(function (f) { h += 44 + ROW + speed.filter(function (s) { return s.family === f; }).length * ROW + 16; });
   var anyLarge = speed.some(function (x) { return x.rttLarge !== undefined && x.rttLarge !== null; });
   if (fams.length) h += anyLarge ? 56 : 28;
@@ -237,10 +265,62 @@ function renderResult(job, nodeName, r, opts) {
 
   // 延遲 / 丟包
   var gx0 = PAD + 140, gw = (W - 2 * PAD - 140) / 3;
+  var provW = 116, halfW = (W - 2 * PAD - provW) / 2, colW = halfW / 3;
+  var sx0 = PAD + provW, lx0 = sx0 + halfW;
+  function drawDualCell(c, colRight, rowY, cellBg) {
+    if (!c) { cv.text(colRight - 14, rowY + 4, "-", C.none, cellBg, { align: "right" }); return; }
+    if (!c.recv) { cv.text(colRight - 14, rowY + 4, "不通", C.bad, cellBg, { align: "right" }); return; }
+    if (c.loss > 0) {
+      var lt = (c.loss < 10 ? c.loss.toFixed(1) : Math.round(c.loss)) + "%";
+      var lw = cv.text(colRight - 14, rowY + 4, lt, lossColor(c.loss), cellBg, { align: "right" });
+      cv.text(colRight - 14 - lw - 6, rowY + 4, fmt.fmtMs(c.avg) + (c.sameAs ? "*" : ""), latColor(c.avg), cellBg, { align: "right" });
+    } else {
+      cv.text(colRight - 14, rowY + 4, fmt.fmtMs(c.avg) + (c.avg !== null ? " ms" : "") + (c.sameAs ? "*" : ""), latColor(c.avg), cellBg, { align: "right" });
+    }
+  }
   lat.forEach(function (b) {
     y += 12;
+    if (b.dual) {
+      var lsz = fmt.largeSizeLabel(r, b.family);
+      cv.text(PAD, y, "IPv" + b.family + " 三網延遲 / 丟包（標準 × " + b.count + " 次 ｜ 大包回程 " + lsz + " × " + b.largeCount + " 次）", C.section, C.bg, { bold: true });
+      y += 32;
+      // 雙層表頭：左半標準、右半大包
+      cv.rect(PAD, y, provW + halfW, 60, C.thBg);
+      cv.rect(lx0, y, halfW, 60, C.thBgL);
+      cv.text(PAD + 10, y + 18, "省份", C.sub, C.thBg);
+      cv.text(sx0 + halfW / 2, y + 3, "標準（TCP 握手）", C.section, C.thBg, { align: "center", bold: true });
+      cv.text(lx0 + halfW / 2, y + 3, "大包回程（" + lsz + "）", C.section, C.thBgL, { align: "center", bold: true });
+      cv.rect(sx0, y + 30, W - PAD - sx0, 1, C.line);
+      ["電信", "聯通", "移動"].forEach(function (n, i) {
+        cv.text(sx0 + colW * (i + 1) - 14, y + 34, n, C.sub, C.thBg, { align: "right" });
+        cv.text(lx0 + colW * (i + 1) - 14, y + 34, n, C.sub, C.thBgL, { align: "right" });
+      });
+      cv.rect(sx0, y, 1, 60, C.line);
+      cv.rect(lx0, y, 1, 60, C.line);
+      y += 60;
+      b.lines.forEach(function (line, li) {
+        var bgS = li % 2 ? C.zebra : C.bg;
+        var bgL = li % 2 ? C.largeZebra : C.largeBg;
+        if (bgS !== C.bg) cv.rect(PAD, y, provW + halfW, ROW, bgS);
+        cv.rect(lx0, y, halfW, ROW, bgL);
+        cv.rect(sx0, y, 1, ROW, C.line);
+        cv.rect(lx0, y, 1, ROW, C.line);
+        cv.text(PAD + 10, y + 4, line.label, C.text, bgS, { maxW: provW - 16 });
+        line.sCells.forEach(function (c, i) { drawDualCell(c, sx0 + colW * (i + 1), y, bgS); });
+        line.lCells.forEach(function (c, i) { drawDualCell(c, lx0 + colW * (i + 1), y, bgL); });
+        y += ROW;
+      });
+      cv.rect(PAD, y, W - 2 * PAD, 1, C.line);
+      y += 8;
+      cv.text(PAD, y, "• " + b.summary, C.sub, C.bg, { maxW: W - 2 * PAD });
+      y += 28;
+      cv.text(PAD, y, "• " + b.largeSummary, C.sub, C.bg, { maxW: W - 2 * PAD });
+      y += 32;
+      b.noteLines.forEach(function (nl) { cv.text(PAD, y - 4, nl, C.sub, C.bg, { maxW: W - 2 * PAD }); y += 28; });
+      return;
+    }
     cv.text(PAD, y, b.large
-      ? "IPv" + b.family + " 大包回程延遲 / 丟包（" + fmt.largeSizeLabel(r) + " × " + b.count + " 次）"
+      ? "IPv" + b.family + " 大包回程延遲 / 丟包（" + fmt.largeSizeLabel(r, b.family) + " × " + b.count + " 次）"
       : "IPv" + b.family + " 三網 TCP 延遲 / 丟包（每個目標握手 " + b.count + " 次）", C.section, C.bg, { bold: true });
     y += 32;
     cv.rect(PAD, y, W - 2 * PAD, ROW, C.thBg);
