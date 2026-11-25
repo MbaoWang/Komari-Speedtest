@@ -42,6 +42,36 @@ function nodeList(v) {
   return [];
 }
 
+// 定時設定（選單）→ cron。Komari 排程用伺服器本地時區，這裡把「北京 / 台北時間（UTC+8）」換算成伺服器時間。
+var SCHEDULE = {
+  "每小時": 1, "每1小時": 1, "每3小時": 3, "每6小時": 6, "每12小時": 12,
+  "每小时": 1, "每3小时": 3, "每6小时": 6, "每12小时": 12
+};
+var WEEKDAYS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+function scheduleToCron(c) {
+  var mode = String(c.schedule || "").trim();
+  var custom = String(c.cron_spec || "").trim();
+  // 舊設定：只有填 Cron 表達式
+  if (!mode) return custom ? { spec: custom, text: "自訂 " + custom } : { spec: "", text: "" };
+  if (mode === "關閉" || mode === "关闭") return { spec: "", text: "" };
+  if (mode === "自訂" || mode === "自定义") return custom ? { spec: custom, text: "自訂 " + custom } : { spec: "", text: "" };
+  if (SCHEDULE[mode]) return { spec: SCHEDULE[mode] === 1 ? "0 * * * *" : "0 */" + SCHEDULE[mode] + " * * *", text: mode };
+  var hour = remote.clampInt(c.schedule_hour, 0, 23, 4);
+  var serverOffset = -new Date().getTimezoneOffset(); // 伺服器本地時區相對 UTC（分鐘）
+  var mins = hour * 60 - 480 + serverOffset;
+  var dayShift = Math.floor(mins / 1440);
+  mins = ((mins % 1440) + 1440) % 1440;
+  var hh = Math.floor(mins / 60), mm = mins % 60;
+  var label = (hour < 10 ? "0" : "") + hour + ":00（UTC+8）";
+  if (mode === "每天") return { spec: mm + " " + hh + " * * *", text: "每天 " + label };
+  if (mode === "每週" || mode === "每周") {
+    var wd = WEEKDAYS.indexOf(String(c.schedule_weekday || "週一").replace("周", "週"));
+    if (wd < 0) wd = 1;
+    return { spec: mm + " " + hh + " * * " + (((wd + dayShift) % 7) + 7) % 7, text: "每" + WEEKDAYS[wd] + " " + label };
+  }
+  return { spec: "", text: "" };
+}
+
 function normalizeConfig(raw) {
   var c = raw || {};
   var pts = "";
@@ -79,7 +109,8 @@ function normalizeConfig(raw) {
     taierUrl: String(c.taier_url || "").trim(),
     customTargets: String(c.custom_targets || ""),
     maxConcurrentJobs: remote.clampInt(c.max_jobs, 1, 20, 3),
-    cronSpec: String(c.cron_spec || "").trim(),
+    cronSpec: scheduleToCron(c).spec,
+    cronText: scheduleToCron(c).text,
     cronType: c.cron_type === "speed" || c.cron_type === "full" ? c.cron_type : "ping",
     cronNodes: nodeList(c.cron_nodes)
   };
@@ -225,6 +256,7 @@ function registerRoutes() {
       lastSettings: mgr.getWebPrefs(),
       provinces: remote.PROVINCES,
       defaults: { family: c.defaultFamily, mode: c.defaultMode, points: c.defaultPoints, isps: c.defaultIsps, duration: c.duration, retries: c.speedRetries },
+      schedule: c.cronSpec ? c.cronText + "｜" + ({ ping: "延遲", speed: "測速", full: "完整" }[c.cronType] || c.cronType) : "",
       publicPage: { enabled: c.publicEnabled, url: "/api/plugin/" + SHORT + "/public/" },
       telegram: { enabled: c.tgEnabled, configured: Boolean(c.tgToken), running: Boolean(bot && bot.isRunning()), allowed: c.tgAllowedIds.length }
     };
@@ -324,7 +356,7 @@ function setupCron() {
         await mgr.run({ clients: online, type: c.cronType, family: c.defaultFamily, points: c.defaultPoints, mode: c.defaultMode, isps: c.defaultIsps, origin: { kind: "cron" } });
       } catch (e) { console.warn("[cn-speedtest] 定時測試失敗：" + errText(e)); }
     });
-    console.info("[cn-speedtest] 已啟用定時測試：" + c.cronSpec + "（" + c.cronType + "）");
+    console.info("[cn-speedtest] 已啟用定時測試：" + c.cronText + "（" + c.cronType + "，伺服器 cron：" + c.cronSpec + "）");
   } catch (e) {
     console.error("[cn-speedtest] Cron 表達式錯誤：" + errText(e));
   }

@@ -206,7 +206,7 @@ function largeScript(count) {
   return [
     "fam=$1; prov=$2; isp=$3; host=$4; ip=$5; port=$6; n=${7:-" + count + "}",
     '[ -n "$ip" ] || exit 0',
-    'if [ "$fam" = 6 ]; then FF=-6; SZ=$LSIZE6; HD=60; else FF=""; SZ=$LSIZE4; HD=40; fi',
+    'if [ "$fam" = 6 ]; then FF="${L2ARGS6:--6}"; SZ=$LSIZE6; HD=60; else FF=""; SZ=$LSIZE4; HD=40; fi',
     "PL=$((SZ - HD))",
     'out=$(nping $FF --tcp -p "$port" --flags syn --data-length "$PL" -c "$n" --delay 200ms "$ip" 2>&1)',
     'printf "%s\\n" "$out" | awk -v f="$fam" -v p="$prov" -v s="$isp" -v h="$host" -v n="$n" \'',
@@ -315,25 +315,72 @@ function buildRemoteCommand(opts) {
       "export LSIZE4 LSIZE6",
       "cat > \"$WORK/large.sh\" <<'KCST_LARGE'",
       largeScript(pingCount),
-      "KCST_LARGE"
+      "KCST_LARGE",
+      "# 預檢（對 Cloudflare）：",
+      "#  - IPv6：一般方式發包收不到回應時，改用二層（指定網卡、來源 / 下一跳 MAC），同 TcpQuality",
+      "#  - 小包通、大包全掉：IPv6 先改 1280 B（IPv6 保證最小 MTU）再試；仍不通代表本機 / 上游擋帶資料的 SYN，略過該協議",
+      'rcvd() { sed -nE "s/.*Rcvd: ([0-9]+).*/\\1/p" | tail -1; }',
+      ': > "$WORK/large.skip"',
+      'if [ "$LARGE" = 1 ]; then',
+      "  for pf in " + fams + "; do",
+      '    if [ "$pf" = 6 ]; then',
+      "      PIP=2606:4700:4700::1111",
+      '      PS=$(nping -6 --tcp -p 443 --flags syn -c 3 --delay 200ms "$PIP" 2>&1 | rcvd)',
+      '      if [ "${PS:-0}" = 0 ] && command -v ip >/dev/null 2>&1; then',
+      '        RT=$(ip -6 route get "$PIP" 2>/dev/null | head -1)',
+      "        LIF=$(echo \"$RT\" | awk '{for(i=1;i<NF;i++) if($i==\"dev\"){print $(i+1);exit}}')",
+      "        LSRC=$(echo \"$RT\" | awk '{for(i=1;i<NF;i++) if($i==\"src\"){print $(i+1);exit}}')",
+      "        LNH=$(echo \"$RT\" | awk '{for(i=1;i<NF;i++) if($i==\"via\"){print $(i+1);exit}}'); LNH=${LNH:-$PIP}",
+      "        [ -z \"$LSRC\" ] && [ -n \"$LIF\" ] && LSRC=$(ip -6 addr show dev \"$LIF\" scope global 2>/dev/null | awk '/inet6 /{sub(/\\/.*/,\"\",$2);print $2;exit}')",
+      "        LSMAC=$(ip link show dev \"$LIF\" 2>/dev/null | awk '/link\\/ether/{print $2;exit}')",
+      "        nmac() { ip -6 neigh show \"$LNH\" dev \"$LIF\" 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i==\"lladdr\"){print $(i+1);exit}}'; }",
+      '        LDMAC=$(nmac); if [ -z "$LDMAC" ] && [ -n "$LIF" ]; then ping -6 -c 1 -W 1 -I "$LIF" "$LNH" >/dev/null 2>&1; LDMAC=$(nmac); fi',
+      '        if [ -n "$LIF" ] && [ -n "$LSRC" ] && [ -n "$LSMAC" ] && [ -n "$LDMAC" ]; then',
+      '          L2="-6 -e $LIF -S ${LSRC%%%*} --source-mac $LSMAC --dest-mac $LDMAC"',
+      '          PS=$(nping $L2 --tcp -p 443 --flags syn -c 3 --delay 200ms "$PIP" 2>&1 | rcvd)',
+      '          if [ "${PS:-0}" -gt 0 ]; then L2ARGS6="$L2"; export L2ARGS6; echo "@@INFO|large|IPv6 改用指定網卡發包（$LIF）"; fi',
+      "        fi",
+      "      fi",
+      "    else",
+      "      PIP=1.1.1.1",
+      '      PS=$(nping --tcp -p 443 --flags syn -c 3 --delay 200ms "$PIP" 2>&1 | rcvd)',
+      "    fi",
+      '    PB=$(sh "$WORK/large.sh" "$pf" pre pre pre "$PIP" 443 3 | awk -F"|" "{print \\$7}")',
+      '    if [ "${PS:-0}" -ge 2 ] && [ "${PB:-0}" -eq 0 ]; then',
+      '      if [ "$pf" = 6 ] && [ "$LSIZE6" -gt 1280 ]; then',
+      "        LSIZE6=1280; export LSIZE6",
+      '        PB=$(sh "$WORK/large.sh" 6 pre pre pre "$PIP" 443 3 | awk -F"|" "{print \\$7}")',
+      '        if [ "${PB:-0}" -gt 0 ]; then echo "@@WARN|large|IPv6 大包在 ' + largeSize + ' B 不通、1280 B 正常（路徑 MTU 較小），已改用 1280 B"; fi',
+      "      fi",
+      '      if [ "${PB:-0}" -eq 0 ]; then echo "@@WARN|large|IPv$pf 大包被本機或上游防火牆擋下（小包正常、大包全掉），已略過 IPv$pf 大包測試"; echo "$pf" >> "$WORK/large.skip"; fi',
+      "    fi",
+      "  done",
+      '  echo "@@LSIZE|$LSIZE4|$LSIZE6|' + largeSize + '"',
+      "fi"
     );
   }
 
   var largeStage = [
-'if [ "${LARGE:-0}" = 1 ]; then',
-        // 預檢：對 Cloudflare 送小包與大包；小包通、大包全掉 = 本機或上游會擋帶資料的 SYN，大包結果不可信
-        '  for pf in ' + fams + '; do',
-        '    if [ "$pf" = 6 ]; then PIP=2606:4700:4700::1111; PF=-6; else PIP=1.1.1.1; PF=""; fi',
-        '    PS=$(nping $PF --tcp -p 443 --flags syn -c 3 --delay 200ms "$PIP" 2>&1 | sed -nE "s/.*Rcvd: ([0-9]+).*/\\1/p" | tail -1)',
-        '    PB=$(sh "$WORK/large.sh" "$pf" pre pre pre "$PIP" 443 3 | awk -F"|" "{print \\$7}")',
-        '    if [ "${PS:-0}" -ge 2 ] && [ "${PB:-0}" -eq 0 ]; then echo "@@WARN|large|IPv$pf 大包被本機或上游防火牆擋下（小包正常、大包全掉），已略過 IPv$pf 大包測試"; echo "$pf" >> "$WORK/large.skip"; fi',
-        "  done",
-        '  awk -v skip=" $(cat "$WORK/large.skip" 2>/dev/null | tr "\\n" " ") " "!index(skip, \\" \\" \\$1 \\" \\")" "$WORK/targets" > "$WORK/targets.large"',
-        '  echo "@@LATL_BEGIN"',
-        '  if echo x | xargs -P 2 -n 1 true >/dev/null 2>&1; then xargs -P "$PAR" -L 1 sh "$WORK/large.sh" < "$WORK/targets.large";',
-        '  else while read -r a1 a2 a3 a4 a5 a6; do sh "$WORK/large.sh" "$a1" "$a2" "$a3" "$a4" "$a5" "$a6"; done < "$WORK/targets.large"; fi',
-        '  echo "@@LATL_END"',
-        "fi"
+    'if [ "${LARGE:-0}" = 1 ]; then',
+    '  awk -v skip=" $(cat "$WORK/large.skip" 2>/dev/null | tr "\\n" " ") " "!index(skip, \\" \\" \\$1 \\" \\")" "$WORK/targets" > "$WORK/targets.large"',
+    "  runlarge() { if echo x | xargs -P 2 -n 1 true >/dev/null 2>&1; then xargs -P \"$PAR\" -L 1 sh \"$WORK/large.sh\" < \"$1\";",
+    "    else while read -r a1 a2 a3 a4 a5 a6; do sh \"$WORK/large.sh\" \"$a1\" \"$a2\" \"$a3\" \"$a4\" \"$a5\" \"$a6\"; done < \"$1\"; fi; }",
+    '  runlarge "$WORK/targets.large" > "$WORK/latl.out"',
+    // IPv6 在 1400 B 全部不通（路徑 MTU 可能小於 1400、IPv6 中途不分片）→ 改 1280 B 重測
+    "  if [ \"$LSIZE6\" -gt 1280 ] && grep -q '^@@LATL|6|' \"$WORK/latl.out\" && ! awk -F'|' '$1==\"@@LATL\" && $2==6 && $7>0 {f=1} END{exit !f}' \"$WORK/latl.out\"; then",
+    "    LSIZE6=1280; export LSIZE6",
+    "    awk '$1==6' \"$WORK/targets.large\" > \"$WORK/targets.l6\"",
+    '    runlarge "$WORK/targets.l6" > "$WORK/latl6.out"',
+    "    if awk -F'|' '$7>0 {f=1} END{exit !f}' \"$WORK/latl6.out\"; then",
+    "      grep -v '^@@LATL|6|' \"$WORK/latl.out\" > \"$WORK/latl.tmp\"; cat \"$WORK/latl6.out\" >> \"$WORK/latl.tmp\"; mv \"$WORK/latl.tmp\" \"$WORK/latl.out\"",
+    '      echo "@@WARN|large|IPv6 大包在 ' + largeSize + ' B 全部不通、1280 B 可以通（路徑 MTU 小於 ' + largeSize + '），已改用 1280 B"',
+    "    else LSIZE6=" + largeSize + "; export LSIZE6; fi",
+    "  fi",
+    '  echo "@@LSIZE|$LSIZE4|$LSIZE6|' + largeSize + '"',
+    '  echo "@@LATL_BEGIN"',
+    '  cat "$WORK/latl.out"',
+    '  echo "@@LATL_END"',
+    "fi"
   ];
 
   if (opts.ping) {
@@ -341,9 +388,13 @@ function buildRemoteCommand(opts) {
       "# ---------- 延遲 / 丟包（TCP 握手，參考 TcpQuality 節點） ----------",
       "PAR=" + parallel,
       'GN=' + shQuote(getNodesUrl),
-      'case "$GN" in *\\?*) GN="$GN&format=tsv&scope=cdn" ;; *) GN="$GN?format=tsv&scope=cdn" ;; esac',
+      'case "$GN" in *\\?*) GS="&" ;; *) GS="?" ;; esac',
       ': > "$WORK/nodes.tsv"',
-      'curl -fsSL --connect-timeout 6 -m 30 "$GN" -o "$WORK/nodes.tsv" 2>/dev/null || curl -4 -fsSL --connect-timeout 6 -m 30 "$GN" -o "$WORK/nodes.tsv" 2>/dev/null || echo "@@WARN|getnodes|無法取得 TcpQuality 節點清單"'
+      // 預設清單（scope=cdn）之外，再抓該協議專用的清單（scope=v4 / v6，TcpQuality 用 -v4 / -v6 時用的），合併去重
+      "getnodes() { curl -fsSL --connect-timeout 6 -m 30 \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null || curl -4 -fsSL --connect-timeout 6 -m 30 \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null; }",
+      'for sc in cdn' + (family === "4" ? " v4" : family === "6" ? " v6" : " v4 v6") + '; do getnodes "$sc" >> "$WORK/nodes.raw"; done',
+      "awk -F'\\t' '!seen[$1 FS $2 FS $3 FS $4 FS $6 FS $7]++' \"$WORK/nodes.raw\" > \"$WORK/nodes.tsv\" 2>/dev/null",
+      '[ -s "$WORK/nodes.tsv" ] || echo "@@WARN|getnodes|無法取得 TcpQuality 節點清單"'
     );
     if (custom.length) {
       L.push("cat >> \"$WORK/nodes.tsv\" <<'KCST_CUSTOM'");

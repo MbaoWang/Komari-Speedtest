@@ -358,7 +358,8 @@
         var tg = d.telegram;
         if (!tg.configured) $("tgtest").title = "尚未設定 Bot Token";
         var pub = d.publicPage;
-        $("publink").innerHTML = pub.enabled ? '訪客公開頁：<a href="' + esc(pub.url) + '" target="_blank" rel="noopener">' + esc(location.origin + pub.url) + "</a>" : "訪客公開頁未開啟（插件設定 →「開放訪客查看結果」）";
+        var sched = d.schedule ? "　｜　定時測試：" + esc(d.schedule) : "　｜　定時測試：未開啟";
+        $("publink").innerHTML = (pub.enabled ? '訪客公開頁：<a href="' + esc(pub.url) + '" target="_blank" rel="noopener">' + esc(location.origin + pub.url) + "</a>" : "訪客公開頁未開啟（插件設定 →「開放訪客查看結果」）") + sched;
       }
       renderNodes(); renderJobs();
       $("jobcount").textContent = "（" + d.jobs.length + " / 保留 " + d.historyKeep + " 筆，超過自動刪除最舊的）";
