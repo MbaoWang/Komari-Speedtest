@@ -13,7 +13,7 @@
     "en": "Test China Telecom/Unicom/Mobile IPv4/IPv6 latency and Taier speedtest from your nodes via the Komari agent, from the admin page or an interactive Telegram bot."
   },
   "author": "MbaoWang",
-  "version": "1.10.1",
+  "version": "1.10.2",
   "url": "https://github.com/MbaoWang/komari-speedtest",
   "komari": ">=1.0.5",
   "entry": "script.js",
@@ -455,16 +455,16 @@
         "options": "關閉,每小時,每3小時,每6小時,每12小時,每天,每週,自訂",
         "default": "關閉",
         "name": {
-          "zh_TW": "多久測一次",
-          "zh_CN": "多久测一次",
-          "zh-CN": "多久测一次",
-          "en": "How often"
+          "zh_TW": "平常多久測一次",
+          "zh_CN": "平常多久测一次",
+          "zh-CN": "平常多久测一次",
+          "en": "How often (normally)"
         },
         "help": {
-          "zh_TW": "選「每天 / 每週」時再設定下面的時間；結果推送到「結果通知 ID」",
-          "zh_CN": "选「每天 / 每周」时再设定下面的时间",
-          "zh-CN": "选「每天 / 每周」时再设定下面的时间",
-          "en": "Pick daily / weekly to set the time below"
+          "zh_TW": "選「關閉」且開啟晚高峰時，只在晚高峰測；結果推送到「結果通知 ID」",
+          "zh_CN": "选「关闭」且开启晚高峰时，只在晚高峰测",
+          "zh-CN": "选「关闭」且开启晚高峰时，只在晚高峰测",
+          "en": "Pick off + peak to test only at peak hours"
         }
       },
       {
@@ -497,20 +497,71 @@
         }
       },
       {
+        "key": "peak_enabled",
+        "type": "switch",
+        "default": false,
+        "name": {
+          "zh_TW": "晚高峰加密測試",
+          "zh_CN": "晚高峰加密测试",
+          "zh-CN": "晚高峰加密测试",
+          "en": "Test more often at peak hours"
+        },
+        "help": {
+          "zh_TW": "在下面的時段改成更密集地測，其餘時間照「平常多久測一次」。注意：泰爾測速每次會用掉不少流量，加密時建議定時項目選「ping」",
+          "zh_CN": "高峰时段更密集地测",
+          "zh-CN": "高峰时段更密集地测",
+          "en": "Speed tests use a lot of traffic"
+        }
+      },
+      {
+        "key": "peak_start",
+        "type": "number",
+        "default": 20,
+        "name": {
+          "zh_TW": "晚高峰從幾點開始（0~23，北京 / 台北時間）",
+          "zh_CN": "晚高峰从几点开始（0~23，北京时间）",
+          "zh-CN": "晚高峰从几点开始（0~23，北京时间）",
+          "en": "Peak start hour (UTC+8)"
+        }
+      },
+      {
+        "key": "peak_end",
+        "type": "number",
+        "default": 24,
+        "name": {
+          "zh_TW": "到幾點結束（1~24，不含；24＝半夜 12 點）",
+          "zh_CN": "到几点结束（1~24，不含）",
+          "zh-CN": "到几点结束（1~24，不含）",
+          "en": "Peak end hour (exclusive, 24 = midnight)"
+        }
+      },
+      {
+        "key": "peak_interval",
+        "type": "select",
+        "options": "每30分鐘,每15分鐘",
+        "default": "每30分鐘",
+        "name": {
+          "zh_TW": "晚高峰多久測一次",
+          "zh_CN": "晚高峰多久测一次",
+          "zh-CN": "晚高峰多久测一次",
+          "en": "Peak interval"
+        }
+      },
+      {
         "key": "cron_spec",
         "type": "string",
         "default": "",
         "name": {
-          "zh_TW": "自訂 Cron（「自訂」時使用，伺服器時區）",
-          "zh_CN": "自定义 Cron（「自訂」时使用）",
-          "zh-CN": "自定义 Cron（「自訂」时使用）",
-          "en": "Custom cron (server time zone)"
+          "zh_TW": "自訂 Cron（「自訂」時使用，伺服器時區，可用 ; 分隔多條）",
+          "zh_CN": "自定义 Cron（可用 ; 分隔多条）",
+          "zh-CN": "自定义 Cron（可用 ; 分隔多条）",
+          "en": "Custom cron (server time zone, ; separated)"
         },
         "help": {
-          "zh_TW": "進階用：分 時 日 月 星期，例如 30 3 * * * 為伺服器時間每天 03:30",
-          "zh_CN": "进阶用：分 时 日 月 星期",
-          "zh-CN": "进阶用：分 时 日 月 星期",
-          "en": "Advanced: min hour day month weekday"
+          "zh_TW": "分 時 日 月 星期。例：*/30 20-23 * * *; 0 0-19 * * * ＝ 20~24 點每 30 分鐘、其他每小時",
+          "zh_CN": "分 时 日 月 星期",
+          "zh-CN": "分 时 日 月 星期",
+          "en": "min hour day month weekday"
         }
       },
       {

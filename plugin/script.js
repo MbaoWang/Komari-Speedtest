@@ -42,34 +42,78 @@ function nodeList(v) {
   return [];
 }
 
-// 定時設定（選單）→ cron。Komari 排程用伺服器本地時區，這裡把「北京 / 台北時間（UTC+8）」換算成伺服器時間。
+// 定時設定（選單）→ 一或多條 cron。Komari 排程用伺服器本地時區，
+// 這裡以「北京 / 台北時間（UTC+8）」計算要跑的時間點，再換算成伺服器時間。
 var SCHEDULE = {
   "每小時": 1, "每1小時": 1, "每3小時": 3, "每6小時": 6, "每12小時": 12,
   "每小时": 1, "每3小时": 3, "每6小时": 6, "每12小时": 12
 };
 var WEEKDAYS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+function pad2(n) { return (n < 10 ? "0" : "") + n; }
+
+// slots：[{ h: 北京小時, m: [分鐘...] }] → 依伺服器時區換算、把分鐘相同的時段合併成 cron
+function slotsToCron(slots, dow) {
+  var S = -new Date().getTimezoneOffset();
+  var byMin = {};
+  slots.forEach(function (sl) {
+    sl.m.forEach(function (m) {
+      var t = sl.h * 60 + m - 480 + S;
+      var shift = Math.floor(t / 1440);
+      t = ((t % 1440) + 1440) % 1440;
+      var key = String(t % 60) + (dow !== undefined ? "@" + ((((dow + shift) % 7) + 7) % 7) : "");
+      (byMin[key] = byMin[key] || []).push(Math.floor(t / 60));
+    });
+  });
+  var groups = {};
+  Object.keys(byMin).forEach(function (k) {
+    var hours = byMin[k].filter(function (h, i, a) { return a.indexOf(h) === i; }).sort(function (a, b) { return a - b; }).join(",");
+    var parts = k.split("@");
+    var gk = hours + "@" + (parts[1] !== undefined ? parts[1] : "*");
+    (groups[gk] = groups[gk] || []).push(Number(parts[0]));
+  });
+  return Object.keys(groups).map(function (gk) {
+    var p = gk.split("@");
+    return groups[gk].sort(function (a, b) { return a - b; }).join(",") + " " + p[0] + " * * " + p[1];
+  });
+}
+
 function scheduleToCron(c) {
   var mode = String(c.schedule || "").trim();
   var custom = String(c.cron_spec || "").trim();
+  var customList = custom.split(/[;；\n]+/).map(function (x) { return x.trim(); }).filter(Boolean);
   // 舊設定：只有填 Cron 表達式
-  if (!mode) return custom ? { spec: custom, text: "自訂 " + custom } : { spec: "", text: "" };
-  if (mode === "關閉" || mode === "关闭") return { spec: "", text: "" };
-  if (mode === "自訂" || mode === "自定义") return custom ? { spec: custom, text: "自訂 " + custom } : { spec: "", text: "" };
-  if (SCHEDULE[mode]) return { spec: SCHEDULE[mode] === 1 ? "0 * * * *" : "0 */" + SCHEDULE[mode] + " * * *", text: mode };
+  if (!mode) return customList.length ? { specs: customList, text: "自訂 " + customList.join("；") } : { specs: [], text: "" };
+  if (mode === "自訂" || mode === "自定义") return customList.length ? { specs: customList, text: "自訂 " + customList.join("；") } : { specs: [], text: "" };
+
+  // 晚高峰加密
+  var peak = bool(c.peak_enabled, false);
+  var ps = remote.clampInt(c.peak_start, 0, 23, 20);
+  var pe = remote.clampInt(c.peak_end, 1, 24, 24);
+  var pStep = /15/.test(String(c.peak_interval || "")) ? 15 : 30;
+  var inPeak = function (h) { return peak && (ps < pe ? h >= ps && h < pe : h >= ps || h < pe); };
+  var peakSlots = [];
+  if (peak) for (var h = 0; h < 24; h++) if (inPeak(h)) { var ms = []; for (var m = 0; m < 60; m += pStep) ms.push(m); peakSlots.push({ h: h, m: ms }); }
+  var peakText = peak ? "晚高峰 " + pad2(ps) + ":00–" + pad2(pe % 24) + ":00 每" + pStep + "分鐘" : "";
+
   var hour = remote.clampInt(c.schedule_hour, 0, 23, 4);
-  var serverOffset = -new Date().getTimezoneOffset(); // 伺服器本地時區相對 UTC（分鐘）
-  var mins = hour * 60 - 480 + serverOffset;
-  var dayShift = Math.floor(mins / 1440);
-  mins = ((mins % 1440) + 1440) % 1440;
-  var hh = Math.floor(mins / 60), mm = mins % 60;
-  var label = (hour < 10 ? "0" : "") + hour + ":00（UTC+8）";
-  if (mode === "每天") return { spec: mm + " " + hh + " * * *", text: "每天 " + label };
-  if (mode === "每週" || mode === "每周") {
+  var specs = [], text = "";
+  if (SCHEDULE[mode]) {
+    var n = SCHEDULE[mode], base = [];
+    for (var b = 0; b < 24; b += n) if (!inPeak(b)) base.push({ h: b, m: [0] });
+    specs = slotsToCron(base);
+    text = mode;
+  } else if (mode === "每天") {
+    specs = inPeak(hour) ? [] : slotsToCron([{ h: hour, m: [0] }]);
+    text = "每天 " + pad2(hour) + ":00";
+  } else if (mode === "每週" || mode === "每周") {
     var wd = WEEKDAYS.indexOf(String(c.schedule_weekday || "週一").replace("周", "週"));
     if (wd < 0) wd = 1;
-    return { spec: mm + " " + hh + " * * " + (((wd + dayShift) % 7) + 7) % 7, text: "每" + WEEKDAYS[wd] + " " + label };
+    specs = inPeak(hour) ? [] : slotsToCron([{ h: hour, m: [0] }], wd);
+    text = "每" + WEEKDAYS[wd] + " " + pad2(hour) + ":00";
   }
-  return { spec: "", text: "" };
+  if (peak) specs = specs.concat(slotsToCron(peakSlots));
+  if (!specs.length) return { specs: [], text: "" };
+  return { specs: specs, text: (peak ? peakText + (text ? "，其餘時間 " + text : "") : text) + "（UTC+8）" };
 }
 
 function normalizeConfig(raw) {
@@ -109,7 +153,8 @@ function normalizeConfig(raw) {
     taierUrl: String(c.taier_url || "").trim(),
     customTargets: String(c.custom_targets || ""),
     maxConcurrentJobs: remote.clampInt(c.max_jobs, 1, 20, 3),
-    cronSpec: scheduleToCron(c).spec,
+    cronSpecs: scheduleToCron(c).specs,
+    cronSpec: scheduleToCron(c).specs.join("；"),
     cronText: scheduleToCron(c).text,
     cronType: c.cron_type === "speed" || c.cron_type === "full" ? c.cron_type : "ping",
     cronNodes: nodeList(c.cron_nodes)
@@ -344,9 +389,8 @@ function registerRoutes() {
 
 function setupCron() {
   var c = cfg();
-  if (!c.cronSpec) return;
-  try {
-    server.cron(c.cronSpec, async function () {
+  if (!c.cronSpecs.length) return;
+  var job = async function () {
       if (!mgr) return;
       try {
         var list = await mgr.nodes(true);
@@ -355,7 +399,9 @@ function setupCron() {
         if (!online.length) return;
         await mgr.run({ clients: online, type: c.cronType, family: c.defaultFamily, points: c.defaultPoints, mode: c.defaultMode, isps: c.defaultIsps, origin: { kind: "cron" } });
       } catch (e) { console.warn("[cn-speedtest] 定時測試失敗：" + errText(e)); }
-    });
+  };
+  try {
+    c.cronSpecs.forEach(function (spec) { server.cron(spec, job); });
     console.info("[cn-speedtest] 已啟用定時測試：" + c.cronText + "（" + c.cronType + "，伺服器 cron：" + c.cronSpec + "）");
   } catch (e) {
     console.error("[cn-speedtest] Cron 表達式錯誤：" + errText(e));
