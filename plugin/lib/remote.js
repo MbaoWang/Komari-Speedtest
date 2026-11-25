@@ -400,8 +400,15 @@ function buildRemoteCommand(opts) {
       'case "$GN" in *\\?*) GS="&" ;; *) GS="?" ;; esac',
       ': > "$WORK/nodes.tsv"',
       // 預設清單（scope=cdn）之外，再抓該協議專用的清單（scope=v4 / v6，TcpQuality 用 -v4 / -v6 時用的），合併去重
-      "getnodes() { curl -fsSL --connect-timeout 6 -m 30 \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null || curl -4 -fsSL --connect-timeout 6 -m 30 \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null; }",
-      'for sc in cdn' + (family === "4" ? " v4" : family === "6" ? " v6" : " v4 v6") + '; do getnodes "$sc" >> "$WORK/nodes.raw"; done',
+      // 每份清單：失敗（非 200 或沒有節點）時改用 IPv4 連線再試，仍失敗則等 3 秒重試一次；結果數量回報為 @@GN
+      "getnodes() { c=$(curl -sS --connect-timeout 6 -m 30 -o \"$2\" -w \"%{http_code}\" \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null); if [ \"$c\" != 200 ]; then c=$(curl -4 -sS --connect-timeout 6 -m 30 -o \"$2\" -w \"%{http_code}\" \"$GN${GS}format=tsv&scope=$1\" 2>/dev/null); fi; echo \"${c:-000}\"; }",
+      "gncount() { n=$(grep -c '^cdn' \"$1\" 2>/dev/null); echo \"${n:-0}\"; }",
+      'for sc in cdn' + (family === "4" ? " v4" : family === "6" ? " v6" : " v4 v6") + '; do',
+      '  f="$WORK/gn.$sc"; c=$(getnodes "$sc" "$f"); n=$(gncount "$f")',
+      '  if [ "$c" != 200 ] || [ "$n" = 0 ]; then sleep 3; c=$(getnodes "$sc" "$f"); n=$(gncount "$f"); fi',
+      '  echo "@@GN|$sc|$n|$c"',
+      '  if [ "$c" = 200 ] && [ "$n" -gt 0 ]; then cat "$f" >> "$WORK/nodes.raw"; elif [ "$sc" != cdn ]; then echo "@@WARN|getnodes|TcpQuality 的 $sc 專用節點清單取得失敗（HTTP $c），只用預設清單，節點會比較少"; fi',
+      "done",
       "awk -F'\\t' '!seen[$1 FS $2 FS $3 FS $4 FS $6 FS $7]++' \"$WORK/nodes.raw\" > \"$WORK/nodes.tsv\" 2>/dev/null",
       // 備援：清單裡沒有要測的協議時，直接解析 Zstatic CDN 節點網域
       "if ! awk -F'\\t' -v f=' " + fams + " ' '$1==\"cdn\" && index(f, \" \" $2 \" \") {x=1} END{exit !x}' \"$WORK/nodes.tsv\" 2>/dev/null; then",
