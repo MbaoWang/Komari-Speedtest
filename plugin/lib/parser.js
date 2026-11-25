@@ -95,10 +95,21 @@ function applyRetrans(rows, block) {
   return rows;
 }
 
+function latRow(p) {
+  var sent = num(p[5]) || 0;
+  var recv = num(p[6]) || 0;
+  return {
+    family: p[1] === "6" ? "6" : "4", prov: p[2] || "-", isp: p[3] || "-", host: p[4] || "",
+    sent: sent, recv: recv, synRetrans: 0, fail: Math.max(0, sent - recv),
+    loss: sent > 0 ? Math.round((1 - recv / sent) * 1000) / 10 : 100,
+    min: num(p[7]), avg: num(p[8]), max: num(p[9]), jitter: num(p[10])
+  };
+}
+
 // 回傳：{ ok, os, arch, ip4, ip6, exit, latency:[], speed:[], errors:[], warnings:[] }
 function parseOutput(raw, exitCode) {
   var text = stripAnsi(raw);
-  var res = { ok: false, os: "", arch: "", ip4: "", ip6: "", exit: "", latency: [], speed: [], errors: [], warnings: [], speedRc: null, retries: [], traffic: { total: null, latency: null, speed: null, points: [] } };
+  var res = { ok: false, os: "", arch: "", ip4: "", ip6: "", exit: "", latency: [], speed: [], errors: [], warnings: [], speedRc: null, retries: [], latencyLarge: [], srvLarge: [], largeSize: null, traffic: { total: null, latency: null, speed: null, points: [] } };
   var lines = text.split("\n");
   var cur = null;
   var blocks = [];
@@ -162,6 +173,18 @@ function parseOutput(raw, exitCode) {
       case "@@RTXS": {
         var o0 = num(p[1]), r0 = num(p[2]), o1 = num(p[3]), r1 = num(p[4]);
         if (last && o0 !== null && o1 !== null && r0 !== null && r1 !== null && o1 > o0) last.snmp = { o: o1 - o0, r: Math.max(0, r1 - r0) };
+        break;
+      }
+      case "@@LSIZE": res.largeSize = { v4: num(p[1]), v6: num(p[2]), wanted: num(p[3]) }; break;
+      case "@@LATL": {
+        var lr = latRow(p);
+        if (p[11] === "E") lr.error = true;
+        res.latencyLarge.push(lr);
+        break;
+      }
+      case "@@SRVL": {
+        var srv = latRow(p);
+        if (p[11] !== "E") res.srvLarge.push({ point: p[2] || "", family: srv.family, sent: srv.sent, recv: srv.recv, loss: srv.loss, avg: srv.avg, min: srv.min, max: srv.max });
         break;
       }
       case "@@LAT": {
@@ -232,13 +255,24 @@ function parseOutput(raw, exitCode) {
   } else if (!sawEnd && res.errors.length === 0) {
     res.warnings.push("腳本未正常結束（可能逾時被中止）");
   }
-  res.latency.sort(function (a, b) {
+  var latSort = function (a, b) {
     if (a.family !== b.family) return a.family < b.family ? -1 : 1;
     if (a.prov !== b.prov) return a.prov < b.prov ? -1 : 1;
     return ispOrder(a.isp) - ispOrder(b.isp);
+  };
+  res.latency.sort(latSort);
+  // 大包：nping 發不出去（例如 IPv6 需要指定網卡）的目標不列入
+  var lErr = res.latencyLarge.filter(function (r) { return r.error; });
+  res.latencyLarge = res.latencyLarge.filter(function (r) { return !r.error; }).sort(latSort);
+  if (lErr.length) res.warnings.push("大包測試有 " + lErr.length + " 個目標無法發送（nping 錯誤），已略過");
+  // 測速伺服器的大包延遲 / 丟包 → 套到測速結果
+  res.srvLarge.forEach(function (x) {
+    res.speed.forEach(function (r) {
+      if (r.region === x.point && r.family === x.family) { r.rttLarge = x.avg; r.lossLarge = x.loss; r.largeSent = x.sent; }
+    });
   });
   res.speed.sort(function (a, b) { return a.family < b.family ? -1 : a.family > b.family ? 1 : 0; });
-  res.ok = res.latency.length > 0 || res.speed.length > 0;
+  res.ok = res.latency.length > 0 || res.speed.length > 0 || res.latencyLarge.length > 0;
   return res;
 }
 

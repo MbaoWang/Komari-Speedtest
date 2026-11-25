@@ -158,12 +158,15 @@ function createJobManager(server, getConfig) {
       taierUrl: cfg.taierUrl,
       customTargets: cfg.customTargets,
       isps: isps,
-      retries: cfg.speedRetries
+      retries: cfg.speedRetries,
+      large: cfg.largeEnabled,
+      largeSize: cfg.largeSize,
+      npingInstall: cfg.npingInstall
     };
     var command = remote.buildRemoteCommand(opts);
-    var estSec = remote.estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: cfg.duration, pingCount: cfg.pingCount, isps: isps, retries: cfg.speedRetries });
+    var estSec = remote.estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: cfg.duration, pingCount: cfg.pingCount, isps: isps, retries: cfg.speedRetries, large: cfg.largeEnabled });
     // 等待上限要涵蓋「每個測速點都重測」的最壞情況
-    var worstSec = remote.estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: cfg.duration, pingCount: cfg.pingCount, isps: isps, retries: 0 }) * (1 + (opts.speed ? cfg.speedRetries : 0));
+    var worstSec = remote.estimateSeconds({ ping: opts.ping, speed: opts.speed, family: family, points: points, mode: mode, duration: cfg.duration, pingCount: cfg.pingCount, isps: isps, retries: 0, large: cfg.largeEnabled }) * (1 + (opts.speed ? cfg.speedRetries : 0));
     var resp = await server.call("admin:exec", { command: command, clients: uuids });
     var taskId = resp && resp.task_id ? String(resp.task_id) : "";
     if (!taskId) throw new Error("admin:exec 沒有回傳 task_id");
@@ -205,7 +208,7 @@ function createJobManager(server, getConfig) {
     job.results[uuid] = parsed;
     var s = load();
     if (!s.latest[uuid]) s.latest[uuid] = {};
-    if (parsed.latency.length) s.latest[uuid].ping = { at: parsed.finishedAt, jobId: job.id, family: job.family, latency: parsed.latency, ip4: parsed.ip4, ip6: parsed.ip6 };
+    if (parsed.latency.length) s.latest[uuid].ping = { at: parsed.finishedAt, jobId: job.id, family: job.family, latency: parsed.latency, latencyLarge: parsed.latencyLarge, largeSize: parsed.largeSize, ip4: parsed.ip4, ip6: parsed.ip6 };
     if (parsed.speed.length) s.latest[uuid].speed = { at: parsed.finishedAt, jobId: job.id, family: job.family, points: job.points, mode: job.mode, speed: parsed.speed, exit: parsed.exit };
     return true;
   }

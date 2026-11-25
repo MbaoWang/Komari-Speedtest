@@ -160,7 +160,7 @@ function pctColor(v) { return v === null || v === undefined ? C.none : v < 1 ? C
 function lossColor(v) { return v === null || v === undefined ? C.none : v <= 0 ? C.good : v < 5 ? C.mid : C.bad; }
 function pctText(v) { return v === null || v === undefined ? "-" : (v < 10 ? v.toFixed(2) : v.toFixed(1)) + "%"; }
 
-function latencyBlocks(latency) {
+function latencyBlocks(latency, tag) {
   var out = [];
   ["4", "6"].forEach(function (fam) {
     var rows = latency.filter(function (r) { return r.family === fam; });
@@ -174,8 +174,8 @@ function latencyBlocks(latency) {
     });
     var lines = provs.map(function (p) { return { label: fmt.tProv(p), cells: map[p] }; });
     others.forEach(function (r) { lines.push({ label: fmt.tProv(r.prov) + fmt.tIsp(r.isp), cells: [r, null, null] }); });
-    var t = fmt.latencyTables(rows)[0];
-    out.push({ family: fam, lines: lines, summary: t ? t.summary : "", count: rows[0].sent });
+    var t = fmt.latencyTables(rows, tag)[0];
+    out.push({ family: fam, lines: lines, summary: t ? t.summary : "", count: rows[0].sent, large: Boolean(tag) });
   });
   return out;
 }
@@ -184,6 +184,7 @@ function latencyBlocks(latency) {
 function renderResult(job, nodeName, r, opts) {
   opts = opts || {};
   var lat = r && r.latency ? latencyBlocks(r.latency) : [];
+  if (r && r.latencyLarge && r.latencyLarge.length) lat = lat.concat(latencyBlocks(r.latencyLarge, "大包"));
   var speed = r && r.speed ? r.speed : [];
   var single = job.mode !== "multi", multi = job.mode !== "single";
   var fams = ["4", "6"].filter(function (f) { return speed.some(function (s) { return s.family === f; }); });
@@ -192,7 +193,8 @@ function renderResult(job, nodeName, r, opts) {
   var h = 96 + 40;
   lat.forEach(function (b) { h += 44 + ROW + b.lines.length * ROW + 40; });
   fams.forEach(function (f) { h += 44 + ROW + speed.filter(function (s) { return s.family === f; }).length * ROW + 16; });
-  if (fams.length) h += 28;
+  var anyLarge = speed.some(function (x) { return x.rttLarge !== undefined && x.rttLarge !== null; });
+  if (fams.length) h += anyLarge ? 56 : 28;
   var msgs = (r ? r.errors.map(function (e) { return "錯誤：" + e; }) : ["沒有收到節點結果"]);
   var notes = r && fmt.retryNote(r) ? ["※ " + fmt.retryNote(r)] : [];
   if (r && fmt.trafficText(r)) notes.unshift(fmt.trafficText(r));
@@ -218,7 +220,9 @@ function renderResult(job, nodeName, r, opts) {
   var gx0 = PAD + 140, gw = (W - 2 * PAD - 140) / 3;
   lat.forEach(function (b) {
     y += 12;
-    cv.text(PAD, y, "IPv" + b.family + " 三網 TCP 延遲 / 丟包（每個目標握手 " + b.count + " 次）", C.section, C.bg, { bold: true });
+    cv.text(PAD, y, b.large
+      ? "IPv" + b.family + " 大包回程延遲 / 丟包（" + fmt.largeSizeLabel(r) + " × " + b.count + " 次）"
+      : "IPv" + b.family + " 三網 TCP 延遲 / 丟包（每個目標握手 " + b.count + " 次）", C.section, C.bg, { bold: true });
     y += 32;
     cv.rect(PAD, y, W - 2 * PAD, ROW, C.thBg);
     cv.text(PAD + 10, y + 4, "省份", C.sub, C.thBg);
@@ -253,7 +257,8 @@ function renderResult(job, nodeName, r, opts) {
     y += 12;
     cv.text(PAD, y, "IPv" + fam + " 泰爾測速（Mbps）", C.section, C.bg, { bold: true });
     y += 32;
-    var cols = [{ k: "rtt", t: "延遲" }];
+    var largeCol = rows.some(function (x) { return x.rttLarge !== undefined && x.rttLarge !== null; });
+    var cols = [largeCol ? { k: "rttLarge", t: "大包延遲" } : { k: "rtt", t: "延遲" }];
     if (single) cols.push({ k: "singleDown", t: "單線程↓" }, { k: "singleUp", t: "單線程↑" });
     if (multi) cols.push({ k: "multiDown", t: "多線程↓" }, { k: "multiUp", t: "多線程↑" });
     cols.push({ k: "upRetrans", t: "回程重傳" });
@@ -270,6 +275,10 @@ function renderResult(job, nodeName, r, opts) {
       cols.forEach(function (c, i) {
         var v = s[c.k], txt, col;
         if (c.k === "rtt") { txt = v === null ? "-" : fmt.fmtMs(v) + " ms"; col = latColor(v); }
+        else if (c.k === "rttLarge") {
+          if (v === null || v === undefined) { txt = s.lossLarge === 100 ? "不通" : "-"; col = C.bad; }
+          else { txt = fmt.fmtMs(v) + (s.lossLarge > 0 ? "/" + Math.round(s.lossLarge) + "%" : " ms"); col = s.lossLarge > 0 ? lossColor(s.lossLarge) : latColor(v); }
+        }
         else if (c.k === "upRetrans") { txt = pctText(v) + (s.rtxSource === "snmp" ? "≈" : ""); col = pctColor(v); }
         else if (c.k === "traffic") { txt = s.trafficRx === undefined ? "-" : fmt.fmtBytes(s.trafficRx + s.trafficTx); col = C.sub; }
         else { txt = v === null || v === undefined || v < 0.001 ? "失敗" : fmt.fmtMbps(v); col = txt === "失敗" ? C.bad : C.text; }
@@ -282,6 +291,7 @@ function renderResult(job, nodeName, r, opts) {
   });
   if (fams.length) {
     cv.text(PAD, y + 4, "↓ 去程（中國→節點）　↑ 回程（節點→中國）　回程重傳＝測速期間節點送出資料的 TCP 重傳比例", C.sub, C.bg, { maxW: W - 2 * PAD });
+    if (anyLarge) { y += 28; cv.text(PAD, y + 4, "大包延遲＝" + fmt.largeSizeLabel(r) + " 的封包到泰爾測速伺服器的延遲（有丟包時顯示 延遲/丟包率）", C.sub, C.bg, { maxW: W - 2 * PAD }); }
     y += 28;
   }
 

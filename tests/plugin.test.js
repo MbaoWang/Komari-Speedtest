@@ -226,3 +226,22 @@ test("消耗流量解析與顯示", () => {
   const png = require("../plugin/lib/render.js").renderResult({ type: "full", family: "4", points: "广东", mode: "both" }, "n", r, {});
   assert.ok(png.length > 1000);
 });
+
+test("大包延遲 / 丟包（nping）解析", () => {
+  const r = parser.parseOutput(fs.readFileSync(path.join(__dirname, "fixtures/node-output-large.txt"), "utf8"), 0);
+  assert.strictEqual(r.latencyLarge.length, 10);
+  const sh = r.latencyLarge.find((x) => x.host === "上海电信");
+  assert.deepStrictEqual([sh.sent, sh.recv, sh.loss], [5, 2, 60]);
+  const small = r.latency.find((x) => x.host === "上海电信");
+  assert.strictEqual(small.loss, 0); // 同一目標小包不丟、大包丟
+  assert.deepStrictEqual(r.largeSize, { v4: 1400, v6: 1400, wanted: 1400 });
+  assert.strictEqual(r.speed[0].rttLarge, 0);
+  assert.strictEqual(r.speed[0].lossLarge, 0);
+  const html = fmt.nodeResultHTML({ type: "full", family: "4", points: "广东移动", mode: "both" }, "n", r, {});
+  assert.match(html, /大包（1400 B）回程延遲/);
+  assert.match(html, /大包延遲/);
+  const cmd = remote.buildRemoteCommand({ runId: "lg-1", ping: true, speed: true, largeSize: 1400 });
+  assert.match(cmd, /nping \$FF --tcp -p "\$port" --flags syn --data-length "\$PL"/);
+  assert.match(cmd, /LSIZE4=1400/);
+  assert.doesNotMatch(remote.buildRemoteCommand({ runId: "lg-2", ping: true, large: false }), /@@LATL_BEGIN/);
+});

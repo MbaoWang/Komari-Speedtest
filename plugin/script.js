@@ -67,6 +67,9 @@ function normalizeConfig(raw) {
     defaultPoints: pts,
     defaultIsps: remote.normIsps(c.default_isps),
     speedRetries: remote.clampInt(c.speed_retries, 0, 3, 1),
+    largeEnabled: bool(c.large_enabled, true),
+    npingInstall: bool(c.nping_install, true),
+    largeSize: remote.clampInt(c.large_size, 200, 1500, 1400),
     historyKeep: remote.clampInt(c.history_keep, 10, 200, 40),
     duration: remote.clampInt(c.duration, 5, 13, 5),
     pingCount: remote.clampInt(c.ping_count, 3, 50, 20),
@@ -161,17 +164,21 @@ async function publicView() {
     if (n.hidden) return;
     var l = mgr.latest(n.uuid) || {};
     var item = { uuid: n.uuid, name: n.name, region: n.region, online: n.online, ping: null, speed: null, image: false };
-    if (l.ping) item.ping = { at: l.ping.at, family: l.ping.family, latency: l.ping.latency.map(function (r) {
+    if (l.ping) item.ping = { at: l.ping.at, family: l.ping.family, largeSize: l.ping.largeSize || null, latencyLarge: (l.ping.latencyLarge || []).map(pubLat), latency: l.ping.latency.map(function (r) {
       return { family: r.family, prov: r.prov, isp: r.isp, sent: r.sent, recv: r.recv, loss: r.loss, synRetrans: r.synRetrans, min: r.min, avg: r.avg, max: r.max, jitter: r.jitter };
     }) };
     if (l.speed) item.speed = { at: l.speed.at, family: l.speed.family, points: l.speed.points, mode: l.speed.mode, exit: l.speed.exit, speed: l.speed.speed.map(function (r) {
-      return { family: r.family, prov: r.prov, isp: r.isp, rtt: r.rtt, singleDown: r.singleDown, singleUp: r.singleUp, multiDown: r.multiDown, multiUp: r.multiUp, upRetrans: r.upRetrans, rtxSource: r.rtxSource };
+      return { family: r.family, prov: r.prov, isp: r.isp, rtt: r.rtt, singleDown: r.singleDown, singleUp: r.singleUp, multiDown: r.multiDown, multiUp: r.multiUp, upRetrans: r.upRetrans, rtxSource: r.rtxSource, rttLarge: r.rttLarge, lossLarge: r.lossLarge };
     }) };
     item.image = Boolean(l.image && l.image.file && !c.imageShowFullIp);
     nodes.push(item);
   });
   var site = await siteSettings();
   return { title: c.publicTitle || "中國網路測速", site: site.name, nodes: nodes };
+}
+
+function pubLat(r) {
+  return { family: r.family, prov: r.prov, isp: r.isp, sent: r.sent, recv: r.recv, loss: r.loss, min: r.min, avg: r.avg, max: r.max };
 }
 
 function publicRoute(p, handler) {
@@ -287,7 +294,8 @@ function registerRoutes() {
         family: b.family || c.defaultFamily, points: b.points !== undefined ? b.points : c.defaultPoints, mode: b.mode || c.defaultMode,
         duration: c.duration, pingCount: c.pingCount, parallel: c.pingParallel, provinceFilter: c.provinceFilter,
         getNodesUrl: c.getNodesUrl, taierUrl: c.taierUrl, customTargets: c.customTargets,
-        isps: b.isps !== undefined ? b.isps : c.defaultIsps, retries: c.speedRetries
+        isps: b.isps !== undefined ? b.isps : c.defaultIsps, retries: c.speedRetries,
+        large: c.largeEnabled, largeSize: c.largeSize, npingInstall: c.npingInstall
       })
     };
   });
