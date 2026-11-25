@@ -361,24 +361,27 @@
   function speedHTML(sp, mode) {
     var html = "";
     var single = mode !== "multi", multi = mode !== "single";
+    var ncols = 2 + (single ? 2 : 0) + (multi ? 2 : 0);
+    var colW = (82 / ncols).toFixed(2) + "%";
+    var cols = '<colgroup><col style="width:18%">' + new Array(ncols + 1).join('<col style="width:' + colW + '">') + "</colgroup>";
     ["4", "6"].forEach(function (fam) {
       var rows = sp.filter(function (r) { return r.family === fam; });
       if (!rows.length) return;
       var lg = rows.some(function (r) { return r.rttLarge != null; });
-      html += '<div class="tablewrap"><table><thead><tr><th>IPv' + fam + ' 泰爾測速 (Mbps)</th><th' + (lg ? ' title="大包封包到測速伺服器的延遲"' : "") + ">" + (lg ? "大包延遲" : "延遲") + "</th>" +
+      html += '<div class="lat-panel"><div class="panel-head"><div class="panel-title"><span class="fam-tag' + (fam === "6" ? " v6" : "") + '">IPv' + fam + '</span><span>泰爾測速（Mbps）</span></div></div>' +
+        '<div class="tablewrap"><table>' + cols + '<thead><tr><th class="sep">測速點</th><th' + (lg ? ' title="大包封包到測速伺服器的延遲"' : "") + ">" + (lg ? "大包延遲" : "延遲") + "</th>" +
         (single ? "<th>單線程↓</th><th>單線程↑</th>" : "") + (multi ? "<th>多線程↓</th><th>多線程↑</th>" : "") + '<th title="測速期間節點送往中國（回程）的資料被 TCP 重傳的比例，與 TcpQuality 的回程重傳相同">回程重傳</th></tr></thead><tbody>';
       rows.forEach(function (r) {
         var lc = lg ? (r.rttLarge == null ? '<td' + (r.lossLarge === 100 ? ' class="bad">不通' : '>-') + "</td>"
           : '<td class="' + (r.lossLarge > 0 ? (r.lossLarge >= 10 ? "bad" : "mid") : latClass(r.rttLarge)) + '">' + ms(r.rttLarge) + (r.lossLarge > 0 ? ' <span class="small">' + Math.round(r.lossLarge) + "%</span>" : "") + "</td>")
           : '<td class="' + latClass(r.rtt) + '">' + ms(r.rtt) + "</td>";
-        html += "<tr><td>" + esc(tProv(r.prov) + (ISP[r.isp] || r.isp)) + "</td>" + lc +
+        html += '<tr><td class="sep">' + esc(tProv(r.prov) + (ISP[r.isp] || r.isp)) + "</td>" + lc +
           (single ? "<td>" + mbps(r.singleDown) + "</td><td>" + mbps(r.singleUp) + "</td>" : "") +
           (multi ? "<td>" + mbps(r.multiDown) + "</td><td>" + mbps(r.multiUp) + "</td>" : "") +
           '<td class="' + pctClass(r.upRetrans) + '" title="' + (r.rtxSource === "snmp" ? "系統整體計數器估算" : r.upSegs != null ? "重傳 " + r.retransSegs + " / 送出 " + r.upSegs + " 段" : "") + '">' + pct(r.upRetrans) + (r.rtxSource === "snmp" ? "≈" : "") + "</td></tr>";
       });
-      html += "</tbody></table></div>";
+      html += '</tbody></table></div><div class="panel-foot"><span>↓ 去程（中國→節點）　↑ 回程（節點→中國）</span><span>單位：延遲 ms・速度 Mbps</span></div></div>';
     });
-    if (html) html += '<div class="small" style="margin:-4px 0 12px">↓ 去程（中國→節點）　↑ 回程（節點→中國）</div>';
     return html;
   }
 

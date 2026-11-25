@@ -369,7 +369,7 @@ function renderResult(job, nodeName, r, opts) {
     var x0 = PAD + 170, cw = (W - 2 * PAD - 170) / cols.length;
     cv.rect(PAD, y, W - 2 * PAD, ROW, C.thBg);
     cv.text(PAD + 10, y + 4, "測速點", C.sub, C.thBg);
-    cols.forEach(function (c, i) { cv.text(x0 + cw * (i + 1) - 14, y + 4, c.t, C.sub, C.thBg, { align: "right" }); });
+    cols.forEach(function (c, i) { cv.text(x0 + cw * (i + 0.5), y + 4, c.t, C.sub, C.thBg, { align: "center" }); });
     y += ROW;
     rows.forEach(function (s, li) {
       var bg = li % 2 ? C.zebra : C.bg;
@@ -385,7 +385,7 @@ function renderResult(job, nodeName, r, opts) {
         else if (c.k === "upRetrans") { txt = pctText(v) + (s.rtxSource === "snmp" ? "≈" : ""); col = pctColor(v); }
         else if (c.k === "traffic") { txt = s.trafficRx === undefined ? "-" : fmt.fmtBytes(s.trafficRx + s.trafficTx); col = C.sub; }
         else { txt = v === null || v === undefined || v < 0.001 ? "失敗" : fmt.fmtMbps(v); col = txt === "失敗" ? C.bad : C.text; }
-        cv.text(x0 + cw * (i + 1) - 14, y + 4, txt, col, bg, { align: "right" });
+        cv.text(x0 + cw * (i + 0.5), y + 4, txt, col, bg, { align: "center" });
       });
       y += ROW;
     });

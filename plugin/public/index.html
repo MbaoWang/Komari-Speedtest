@@ -206,17 +206,20 @@
     if (!rows.length) return "";
     var mode = n.speed.mode, single = mode !== "multi", multi = mode !== "single";
     var lg = rows.some(function (r) { return r.rttLarge != null; });
-    var h = '<div class="tablewrap"><table><thead><tr><th>測速點</th><th>' + (lg ? "大包延遲" : "延遲") + "</th>" + (single ? "<th>單線程↓</th><th>單線程↑</th>" : "") + (multi ? "<th>多線程↓</th><th>多線程↑</th>" : "") + "<th>回程重傳</th></tr></thead><tbody>";
+    var ncols = 2 + (single ? 2 : 0) + (multi ? 2 : 0);
+    var colW = (82 / ncols).toFixed(2) + "%";
+    var cols = '<colgroup><col style="width:18%">' + new Array(ncols + 1).join('<col style="width:' + colW + '">') + "</colgroup>";
+    var h = '<div class="lat-panel"><div class="tablewrap"><table>' + cols + '<thead><tr><th class="sep">測速點</th><th>' + (lg ? "大包延遲" : "延遲") + "</th>" + (single ? "<th>單線程↓</th><th>單線程↑</th>" : "") + (multi ? "<th>多線程↓</th><th>多線程↑</th>" : "") + "<th>回程重傳</th></tr></thead><tbody>";
     rows.forEach(function (r) {
       var lc = lg ? (r.rttLarge == null ? '<td' + (r.lossLarge === 100 ? ' class="bad">不通' : '>-') + "</td>"
         : '<td class="' + (r.lossLarge > 0 ? lossClass(r.lossLarge) : latClass(r.rttLarge)) + '">' + ms(r.rttLarge) + (r.lossLarge > 0 ? " / " + Math.round(r.lossLarge) + "%" : "") + "</td>")
         : '<td class="' + latClass(r.rtt) + '">' + ms(r.rtt) + "</td>";
-      h += "<tr><td>" + esc(tProv(r.prov) + (ISP[r.isp] || r.isp)) + "</td>" + lc +
+      h += '<tr><td class="sep">' + esc(tProv(r.prov) + (ISP[r.isp] || r.isp)) + "</td>" + lc +
         (single ? "<td>" + mbps(r.singleDown) + "</td><td>" + mbps(r.singleUp) + "</td>" : "") +
         (multi ? "<td>" + mbps(r.multiDown) + "</td><td>" + mbps(r.multiUp) + "</td>" : "") +
         '<td class="' + pctClass(r.upRetrans) + '">' + pct(r.upRetrans) + (r.rtxSource === "snmp" ? "≈" : "") + "</td></tr>";
     });
-    return h + "</tbody></table></div>";
+    return h + '</tbody></table></div><div class="panel-foot">↓ 去程（中國→節點）　↑ 回程（節點→中國）｜單位：延遲 ms・速度 Mbps</div></div>';
   }
 
   function render() {
