@@ -237,12 +237,14 @@
       var cell = function (r) {
         if (!r) return "<td>-</td>";
         if (!r.recv) return '<td class="bad">×</td>';
-        return '<td class="' + latClass(r.avg) + '" title="' + esc(r.host) + "\n最小 " + ms(r.min) + " / 最大 " + ms(r.max) + " / 抖動 " + ms(r.jitter) + "\n發送 " + r.sent + "，成功 " + r.recv + "，握手重傳 " + (r.synRetrans || 0) + "，失敗 " + (r.fail != null ? r.fail : r.sent - r.recv) + '">' + ms(r.avg) + (r.loss > 0 ? ' <span class="' + (r.loss >= 10 ? "bad" : "mid") + ' small">' + (r.loss < 10 ? r.loss.toFixed(1) : Math.round(r.loss)) + "%</span>" : "") + "</td>";
+        return '<td class="' + latClass(r.avg) + '" title="' + esc(r.host) + (r.sameAs ? "\n與 " + r.sameAs + " 共用同一節點" : "") + "\n最小 " + ms(r.min) + " / 最大 " + ms(r.max) + " / 抖動 " + ms(r.jitter) + "\n發送 " + r.sent + "，成功 " + r.recv + "，握手重傳 " + (r.synRetrans || 0) + "，失敗 " + (r.fail != null ? r.fail : r.sent - r.recv) + '">' + ms(r.avg) + (r.sameAs ? "<sup>*</sup>" : "") + (r.loss > 0 ? ' <span class="' + (r.loss >= 10 ? "bad" : "mid") + ' small">' + (r.loss < 10 ? r.loss.toFixed(1) : Math.round(r.loss)) + "%</span>" : "") + "</td>";
       };
       html += '<div class="tablewrap"><table><thead><tr><th>IPv' + fam + " " + (title || "延遲 (ms) / 丟包") + '</th><th>電信</th><th>聯通</th><th>移動</th></tr></thead><tbody>';
       provs.forEach(function (p) { html += "<tr><td>" + esc(p) + "</td>" + cell(map[p][0]) + cell(map[p][1]) + cell(map[p][2]) + "</tr>"; });
       others.forEach(function (r) { html += "<tr><td>" + esc(r.prov + " " + (ISP[r.isp] || r.isp)) + "</td>" + cell(r) + "<td></td><td></td></tr>"; });
       html += "</tbody></table></div>";
+      var sh = rows.filter(function (r) { return r.sameAs; }).map(function (r) { return r.prov + (ISP[r.isp] || r.isp) + "＝" + r.sameAs; });
+      if (sh.length && !title) html += '<div class="small" style="margin:-6px 0 10px">* 共用同一節點（Zstatic 在該省沒有獨立節點）：' + esc(sh.join("、")) + "</div>";
     });
     return html;
   }
@@ -358,7 +360,8 @@
         var tg = d.telegram;
         if (!tg.configured) $("tgtest").title = "尚未設定 Bot Token";
         var pub = d.publicPage;
-        $("publink").innerHTML = pub.enabled ? '訪客公開頁：<a href="' + esc(pub.url) + '" target="_blank" rel="noopener">' + esc(location.origin + pub.url) + "</a>" : "訪客公開頁未開啟（插件設定 →「開放訪客查看結果」）";
+        var sched = d.schedule ? "　｜　定時測試：" + esc(d.schedule) : "　｜　定時測試：未開啟";
+        $("publink").innerHTML = (pub.enabled ? '訪客公開頁：<a href="' + esc(pub.url) + '" target="_blank" rel="noopener">' + esc(location.origin + pub.url) + "</a>" : "訪客公開頁未開啟（插件設定 →「開放訪客查看結果」）") + sched;
       }
       renderNodes(); renderJobs();
       $("jobcount").textContent = "（" + d.jobs.length + " / 保留 " + d.historyKeep + " 筆，超過自動刪除最舊的）";

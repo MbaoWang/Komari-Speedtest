@@ -131,7 +131,7 @@
     var cell = function (r) {
       if (!r) return "<td>-</td><td></td>";
       if (!r.recv) return '<td class="bad">不通</td><td class="bad">100%</td>';
-      return '<td class="' + latClass(r.avg) + '" title="最小 ' + ms(r.min) + " / 最大 " + ms(r.max) + " / 抖動 " + ms(r.jitter) + '">' + ms(r.avg) + '</td><td class="' + lossClass(r.loss) + '">' + (r.loss < 10 ? r.loss.toFixed(1) : Math.round(r.loss)) + "%</td>";
+      return '<td class="' + latClass(r.avg) + '" title="' + (r.sameAs ? "與 " + esc(r.sameAs) + " 共用同一節點　" : "") + '最小 ' + ms(r.min) + " / 最大 " + ms(r.max) + " / 抖動 " + ms(r.jitter) + '">' + ms(r.avg) + (r.sameAs ? "<sup>*</sup>" : "") + '</td><td class="' + lossClass(r.loss) + '">' + (r.loss < 10 ? r.loss.toFixed(1) : Math.round(r.loss)) + "%</td>";
     };
     var z = n.ping.largeSize;
     var h = (large ? '<div class="small" style="margin-top:6px">大包（' + (z ? (z.v4 && z.v6 && z.v4 !== z.v6 ? "IPv4 " + z.v4 + " B／IPv6 " + z.v6 + " B" : (z.v4 || z.v6 || z.wanted) + " B") : "1400 B") + "）回程延遲 / 丟包</div>" : "") +

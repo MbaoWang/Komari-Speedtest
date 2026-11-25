@@ -13,7 +13,7 @@
     "en": "Test China Telecom/Unicom/Mobile IPv4/IPv6 latency and Taier speedtest from your nodes via the Komari agent, from the admin page or an interactive Telegram bot."
   },
   "author": "MbaoWang",
-  "version": "1.10.0",
+  "version": "1.10.3",
   "url": "https://github.com/MbaoWang/komari-speedtest",
   "komari": ">=1.0.5",
   "entry": "script.js",
@@ -450,20 +450,118 @@
         }
       },
       {
+        "key": "schedule",
+        "type": "select",
+        "options": "關閉,每小時,每3小時,每6小時,每12小時,每天,每週,自訂",
+        "default": "關閉",
+        "name": {
+          "zh_TW": "平常多久測一次",
+          "zh_CN": "平常多久测一次",
+          "zh-CN": "平常多久测一次",
+          "en": "How often (normally)"
+        },
+        "help": {
+          "zh_TW": "選「關閉」且開啟晚高峰時，只在晚高峰測；結果推送到「結果通知 ID」",
+          "zh_CN": "选「关闭」且开启晚高峰时，只在晚高峰测",
+          "zh-CN": "选「关闭」且开启晚高峰时，只在晚高峰测",
+          "en": "Pick off + peak to test only at peak hours"
+        }
+      },
+      {
+        "key": "schedule_hour",
+        "type": "number",
+        "default": 4,
+        "name": {
+          "zh_TW": "幾點測（0~23，北京 / 台北時間）",
+          "zh_CN": "几点测（0~23，北京时间）",
+          "zh-CN": "几点测（0~23，北京时间）",
+          "en": "Hour (0-23, UTC+8)"
+        },
+        "help": {
+          "zh_TW": "「每天」「每週」使用；會自動換算成伺服器時區",
+          "zh_CN": "「每天」「每周」使用",
+          "zh-CN": "「每天」「每周」使用",
+          "en": "Used by daily / weekly"
+        }
+      },
+      {
+        "key": "schedule_weekday",
+        "type": "select",
+        "options": "週一,週二,週三,週四,週五,週六,週日",
+        "default": "週一",
+        "name": {
+          "zh_TW": "星期幾（「每週」使用）",
+          "zh_CN": "星期几（「每周」使用）",
+          "zh-CN": "星期几（「每周」使用）",
+          "en": "Weekday (weekly)"
+        }
+      },
+      {
+        "key": "peak_enabled",
+        "type": "switch",
+        "default": false,
+        "name": {
+          "zh_TW": "晚高峰加密測試",
+          "zh_CN": "晚高峰加密测试",
+          "zh-CN": "晚高峰加密测试",
+          "en": "Test more often at peak hours"
+        },
+        "help": {
+          "zh_TW": "在下面的時段改成更密集地測，其餘時間照「平常多久測一次」。注意：泰爾測速每次會用掉不少流量，加密時建議定時項目選「ping」",
+          "zh_CN": "高峰时段更密集地测",
+          "zh-CN": "高峰时段更密集地测",
+          "en": "Speed tests use a lot of traffic"
+        }
+      },
+      {
+        "key": "peak_start",
+        "type": "number",
+        "default": 20,
+        "name": {
+          "zh_TW": "晚高峰從幾點開始（0~23，北京 / 台北時間）",
+          "zh_CN": "晚高峰从几点开始（0~23，北京时间）",
+          "zh-CN": "晚高峰从几点开始（0~23，北京时间）",
+          "en": "Peak start hour (UTC+8)"
+        }
+      },
+      {
+        "key": "peak_end",
+        "type": "number",
+        "default": 24,
+        "name": {
+          "zh_TW": "到幾點結束（1~24，不含；24＝半夜 12 點）",
+          "zh_CN": "到几点结束（1~24，不含）",
+          "zh-CN": "到几点结束（1~24，不含）",
+          "en": "Peak end hour (exclusive, 24 = midnight)"
+        }
+      },
+      {
+        "key": "peak_interval",
+        "type": "select",
+        "options": "每30分鐘,每15分鐘",
+        "default": "每30分鐘",
+        "name": {
+          "zh_TW": "晚高峰多久測一次",
+          "zh_CN": "晚高峰多久测一次",
+          "zh-CN": "晚高峰多久测一次",
+          "en": "Peak interval"
+        }
+      },
+      {
         "key": "cron_spec",
         "type": "string",
         "default": "",
         "name": {
-          "zh_TW": "Cron 表達式（留空=停用）",
-          "zh_CN": "Cron 表达式（留空=停用）",
-          "zh-CN": "Cron 表达式（留空=停用）",
-          "en": "Cron (empty = disabled)"
+          "zh_TW": "自訂 Cron（「自訂」時使用，伺服器時區，可用 ; 分隔多條）",
+          "zh_CN": "自定义 Cron（可用 ; 分隔多条）",
+          "zh-CN": "自定义 Cron（可用 ; 分隔多条）",
+          "en": "Custom cron (server time zone, ; separated)"
         },
         "help": {
-          "zh_TW": "例如 0 8 * * * 每天 8 點；結果推送到「結果通知 ID」",
-          "zh_CN": "例如 0 8 * * *",
-          "zh-CN": "例如 0 8 * * *",
-          "en": "e.g. 0 8 * * *"
+          "zh_TW": "分 時 日 月 星期。例：*/30 20-23 * * *; 0 0-19 * * * ＝ 20~24 點每 30 分鐘、其他每小時",
+          "zh_CN": "分 时 日 月 星期",
+          "zh-CN": "分 时 日 月 星期",
+          "en": "min hour day month weekday"
         }
       },
       {
@@ -472,9 +570,9 @@
         "options": "ping,speed,full",
         "default": "ping",
         "name": {
-          "zh_TW": "定時測試類型（ping=延遲 speed=測速 full=兩者）",
-          "zh_CN": "定时测试类型",
-          "zh-CN": "定时测试类型",
+          "zh_TW": "定時測試項目（ping=三網延遲 speed=泰爾測速 full=兩者）",
+          "zh_CN": "定时测试项目（ping=三网延迟 speed=泰尔测速 full=两者）",
+          "zh-CN": "定时测试项目（ping=三网延迟 speed=泰尔测速 full=两者）",
           "en": "Scheduled test type"
         }
       },
