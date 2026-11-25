@@ -13,7 +13,7 @@
     "en": "Test China Telecom/Unicom/Mobile IPv4/IPv6 latency and Taier speedtest from your nodes via the Komari agent, from the admin page or an interactive Telegram bot."
   },
   "author": "MbaoWang",
-  "version": "1.10.3",
+  "version": "1.10.4",
   "url": "https://github.com/MbaoWang/komari-speedtest",
   "komari": ">=1.0.5",
   "entry": "script.js",
@@ -472,16 +472,16 @@
         "type": "number",
         "default": 4,
         "name": {
-          "zh_TW": "幾點測（0~23，北京 / 台北時間）",
-          "zh_CN": "几点测（0~23，北京时间）",
-          "zh-CN": "几点测（0~23，北京时间）",
-          "en": "Hour (0-23, UTC+8)"
+          "zh_TW": "幾點測（只有選「每天」「每週」才用到）",
+          "zh_CN": "几点测（只有选「每天」「每周」才用到）",
+          "zh-CN": "几点测（只有选「每天」「每周」才用到）",
+          "en": "Hour (daily / weekly only)"
         },
         "help": {
-          "zh_TW": "「每天」「每週」使用；會自動換算成伺服器時區",
-          "zh_CN": "「每天」「每周」使用",
-          "zh-CN": "「每天」「每周」使用",
-          "en": "Used by daily / weekly"
+          "zh_TW": "填 0~23，北京 / 台北時間，例如 3 = 凌晨 3 點；會自動換算成伺服器時區",
+          "zh_CN": "填 0~23，北京时间，例如 3 = 凌晨 3 点",
+          "zh-CN": "填 0~23，北京时间，例如 3 = 凌晨 3 点",
+          "en": "0-23 in UTC+8"
         }
       },
       {
@@ -490,10 +490,16 @@
         "options": "週一,週二,週三,週四,週五,週六,週日",
         "default": "週一",
         "name": {
-          "zh_TW": "星期幾（「每週」使用）",
-          "zh_CN": "星期几（「每周」使用）",
-          "zh-CN": "星期几（「每周」使用）",
-          "en": "Weekday (weekly)"
+          "zh_TW": "每週的哪一天測（只有選「每週」才用到）",
+          "zh_CN": "每周的哪一天测（只有选「每周」才用到）",
+          "zh-CN": "每周的哪一天测（只有选「每周」才用到）",
+          "en": "Weekday (weekly only)"
+        },
+        "help": {
+          "zh_TW": "例如選「週一」＋幾點測 3 ＝ 每週一凌晨 3 點；其他頻率不用管這個",
+          "zh_CN": "例如选「周一」＋几点测 3 ＝ 每周一凌晨 3 点",
+          "zh-CN": "例如选「周一」＋几点测 3 ＝ 每周一凌晨 3 点",
+          "en": "e.g. Monday + hour 3 = every Monday 03:00"
         }
       },
       {
@@ -567,13 +573,19 @@
       {
         "key": "cron_type",
         "type": "select",
-        "options": "ping,speed,full",
-        "default": "ping",
+        "options": "三網延遲,泰爾測速,完整（延遲＋測速）",
+        "default": "三網延遲",
         "name": {
-          "zh_TW": "定時測試項目（ping=三網延遲 speed=泰爾測速 full=兩者）",
-          "zh_CN": "定时测试项目（ping=三网延迟 speed=泰尔测速 full=两者）",
-          "zh-CN": "定时测试项目（ping=三网延迟 speed=泰尔测速 full=两者）",
-          "en": "Scheduled test type"
+          "zh_TW": "定時測什麼",
+          "zh_CN": "定时测什么",
+          "zh-CN": "定时测什么",
+          "en": "Scheduled test"
+        },
+        "help": {
+          "zh_TW": "三網延遲：小包＋大包延遲 / 丟包，流量很少；泰爾測速、完整：每次會用掉不少流量，定時頻率高時建議選三網延遲",
+          "zh_CN": "三网延迟流量很少；泰尔测速每次会用掉不少流量",
+          "zh-CN": "三网延迟流量很少；泰尔测速每次会用掉不少流量",
+          "en": "Latency uses little traffic; speed tests use a lot"
         }
       },
       {
@@ -581,10 +593,10 @@
         "type": "nodes",
         "default": "[]",
         "name": {
-          "zh_TW": "定時測試節點（留空=全部在線）",
-          "zh_CN": "定时测试节点（留空=全部在线）",
-          "zh-CN": "定时测试节点（留空=全部在线）",
-          "en": "Scheduled nodes (empty = all online)"
+          "zh_TW": "定時測哪些節點（不選＝全部在線節點）",
+          "zh_CN": "定时测哪些节点（不选＝全部在线节点）",
+          "zh-CN": "定时测哪些节点（不选＝全部在线节点）",
+          "en": "Scheduled nodes (none = all online)"
         }
       },
       {
