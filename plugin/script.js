@@ -116,6 +116,14 @@ function scheduleToCron(c) {
   return { specs: specs, text: (peak ? peakText + (text ? "，其餘時間 " + text : "") : text) + "（UTC+8）" };
 }
 
+// 定時測試項目：選單顯示中文，相容舊的 ping / speed / full
+function cronTypeOf(v) {
+  var t = String(v || "").trim();
+  if (t === "speed" || /泰爾測速|泰尔测速/.test(t)) return "speed";
+  if (t === "full" || /完整/.test(t)) return "full";
+  return "ping";
+}
+
 function normalizeConfig(raw) {
   var c = raw || {};
   var pts = "";
@@ -156,7 +164,7 @@ function normalizeConfig(raw) {
     cronSpecs: scheduleToCron(c).specs,
     cronSpec: scheduleToCron(c).specs.join("；"),
     cronText: scheduleToCron(c).text,
-    cronType: c.cron_type === "speed" || c.cron_type === "full" ? c.cron_type : "ping",
+    cronType: cronTypeOf(c.cron_type),
     cronNodes: nodeList(c.cron_nodes)
   };
 }
