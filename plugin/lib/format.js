@@ -204,6 +204,7 @@ function nodeResultHTML(job, nodeName, r, opts) {
     lt.forEach(function (t) { parts.push("<pre>" + esc(t.table) + "</pre>"); });
     lt.forEach(function (t) { parts.push("• " + esc(t.summary)); });
     lt.forEach(function (t) { if (t.note) parts.push(esc(t.note)); });
+    if (r.nodeLists && r.nodeLists.length) parts.push(esc("節點清單：" + r.nodeLists.map(function (x) { return x.scope + " " + x.count + " 個" + (x.http !== "200" ? "（HTTP " + x.http + "）" : ""); }).join("、")));
   }
   if (r.latencyLarge && r.latencyLarge.length) {
     var ll = latencyTables(r.latencyLarge, "大包");

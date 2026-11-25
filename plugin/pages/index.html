@@ -295,6 +295,7 @@
     if (r.exit) h += "<span>泰爾識別：" + esc(r.exit) + "</span>";
     h += "</div>";
     if (r.latency && r.latency.length) h += latencyHTML(r.latency);
+    if (r.nodeLists && r.nodeLists.length) h += '<div class="small" style="margin:-6px 0 10px">節點清單：' + esc(r.nodeLists.map(function (x) { return x.scope + " " + x.count + " 個" + (x.http !== "200" ? "（HTTP " + x.http + "）" : ""); }).join("、")) + "</div>";
     if (r.latencyLarge && r.latencyLarge.length) h += latencyHTML(r.latencyLarge, "大包（" + largeLabel(r.largeSize) + "）回程延遲 / 丟包");
     if (r.speed && r.speed.length) h += speedHTML(r.speed, mode);
     if (r.traffic && r.traffic.total) {

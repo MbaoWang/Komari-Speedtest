@@ -114,7 +114,7 @@ function latRow(p) {
 // 回傳：{ ok, os, arch, ip4, ip6, exit, latency:[], speed:[], errors:[], warnings:[] }
 function parseOutput(raw, exitCode) {
   var text = stripAnsi(raw);
-  var res = { ok: false, os: "", arch: "", ip4: "", ip6: "", exit: "", latency: [], speed: [], errors: [], warnings: [], speedRc: null, retries: [], latencyLarge: [], srvLarge: [], largeSize: null, shared: [], traffic: { total: null, latency: null, speed: null, points: [] } };
+  var res = { ok: false, os: "", arch: "", ip4: "", ip6: "", exit: "", latency: [], speed: [], errors: [], warnings: [], speedRc: null, retries: [], latencyLarge: [], srvLarge: [], largeSize: null, shared: [], nodeLists: [], traffic: { total: null, latency: null, speed: null, points: [] } };
   var lines = text.split("\n");
   var cur = null;
   var blocks = [];
@@ -180,6 +180,7 @@ function parseOutput(raw, exitCode) {
         if (last && o0 !== null && o1 !== null && r0 !== null && r1 !== null && o1 > o0) last.snmp = { o: o1 - o0, r: Math.max(0, r1 - r0) };
         break;
       }
+      case "@@GN": res.nodeLists.push({ scope: p[1] || "", count: num(p[2]) || 0, http: p[3] || "" }); break;
       case "@@SHARE": res.shared.push({ family: p[1] === "6" ? "6" : "4", prov: p[2] || "", isp: p[3] || "", sameProv: p[4] || "", sameIsp: p[5] || "" }); break;
       case "@@LSIZE": res.largeSize = { v4: num(p[1]), v6: num(p[2]), wanted: num(p[3]) }; break;
       case "@@LATL": {
