@@ -45,7 +45,10 @@
   .lat-panel { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 8px 0 12px; max-width: 760px; background: var(--card); }
   .lat-panel.narrow { max-width: 480px; }
   .lat-panel .tablewrap { margin: 0; max-width: none; }
-  .lat-panel table th, .lat-panel table td { padding: 5px 10px; }
+  .lat-panel table { table-layout: fixed; }
+  .lat-panel:not(.narrow) table { min-width: 580px; }
+  .lat-panel table th, .lat-panel table td { padding: 6px 8px; text-align: center; }
+  .lat-panel thead tr:first-child th:first-child, .lat-panel tbody td:first-child { text-align: left; padding-left: 14px; }
   .lat-panel tbody tr:hover { background: var(--chip); }
   .lat-panel th.grp { text-align: center; background: var(--chip); font-size: 12px; }
   .lat-panel th.lg, .lat-panel td.lg { background: rgba(148, 163, 184, 0.08); }
@@ -170,6 +173,7 @@
       var sg = groupLat(sRows), lg = groupLat(lRows);
       var provs = sg.provs.slice();
       lg.provs.forEach(function (p) { if (provs.indexOf(p) < 0) provs.push(p); });
+      h += '<colgroup><col style="width:13%"><col style="width:14.5%"><col style="width:14.5%"><col style="width:14.5%"><col style="width:14.5%"><col style="width:14.5%"><col style="width:14.5%"></colgroup>';
       h += '<thead><tr><th rowspan="2" class="sep">省份</th><th colspan="3" class="grp sep">標準（TCP 握手）</th><th colspan="3" class="grp lg">大包回程（' + esc(lsz) + '）</th></tr><tr><th>電信</th><th>聯通</th><th class="sep">移動</th><th class="lg">電信</th><th class="lg">聯通</th><th class="lg">移動</th></tr></thead><tbody>';
       provs.forEach(function (p) {
         var sc = sg.map[p] || [null, null, null], lc = lg.map[p] || [null, null, null];
@@ -186,6 +190,7 @@
       var onlyRows = sRows.length ? sRows : lRows;
       var g = groupLat(onlyRows);
       var title = sRows.length ? "省份" : "大包（" + esc(lsz) + "）";
+      h += '<colgroup><col style="width:22%"><col style="width:26%"><col style="width:26%"><col style="width:26%"></colgroup>';
       h += '<thead><tr><th class="sep">' + title + '</th><th>電信</th><th>聯通</th><th>移動</th></tr></thead><tbody>';
       g.provs.forEach(function (p) { h += '<tr><td class="sep">' + esc(tProv(p)) + "</td>" + latCell(g.map[p][0]) + latCell(g.map[p][1]) + latCell(g.map[p][2]) + "</tr>"; });
       g.others.forEach(function (r) { h += '<tr><td class="sep">' + esc(tProv(r.prov) + " " + (ISP[r.isp] || r.isp)) + "</td>" + latCell(r) + "<td></td><td></td></tr>"; });

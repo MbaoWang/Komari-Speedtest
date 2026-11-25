@@ -267,15 +267,18 @@ function renderResult(job, nodeName, r, opts) {
   var gx0 = PAD + 140, gw = (W - 2 * PAD - 140) / 3;
   var provW = 116, halfW = (W - 2 * PAD - provW) / 2, colW = halfW / 3;
   var sx0 = PAD + provW, lx0 = sx0 + halfW;
-  function drawDualCell(c, colRight, rowY, cellBg) {
-    if (!c) { cv.text(colRight - 14, rowY + 4, "-", C.none, cellBg, { align: "right" }); return; }
-    if (!c.recv) { cv.text(colRight - 14, rowY + 4, "不通", C.bad, cellBg, { align: "right" }); return; }
+  function drawDualCell(c, colCenter, rowY, cellBg) {
+    if (!c) { cv.text(colCenter, rowY + 4, "-", C.none, cellBg, { align: "center" }); return; }
+    if (!c.recv) { cv.text(colCenter, rowY + 4, "不通", C.bad, cellBg, { align: "center" }); return; }
     if (c.loss > 0) {
+      var at = fmt.fmtMs(c.avg) + (c.sameAs ? "*" : "");
       var lt = (c.loss < 10 ? c.loss.toFixed(1) : Math.round(c.loss)) + "%";
-      var lw = cv.text(colRight - 14, rowY + 4, lt, lossColor(c.loss), cellBg, { align: "right" });
-      cv.text(colRight - 14 - lw - 6, rowY + 4, fmt.fmtMs(c.avg) + (c.sameAs ? "*" : ""), latColor(c.avg), cellBg, { align: "right" });
+      var aw = cv.textWidth(at), lw = cv.textWidth(lt), tw = aw + 6 + lw;
+      var x0 = Math.round(colCenter - tw / 2);
+      cv.text(x0, rowY + 4, at, latColor(c.avg), cellBg);
+      cv.text(x0 + aw + 6, rowY + 4, lt, lossColor(c.loss), cellBg);
     } else {
-      cv.text(colRight - 14, rowY + 4, fmt.fmtMs(c.avg) + (c.avg !== null ? " ms" : "") + (c.sameAs ? "*" : ""), latColor(c.avg), cellBg, { align: "right" });
+      cv.text(colCenter, rowY + 4, fmt.fmtMs(c.avg) + (c.avg !== null ? " ms" : "") + (c.sameAs ? "*" : ""), latColor(c.avg), cellBg, { align: "center" });
     }
   }
   lat.forEach(function (b) {
@@ -292,8 +295,8 @@ function renderResult(job, nodeName, r, opts) {
       cv.text(lx0 + halfW / 2, y + 3, "大包回程（" + lsz + "）", C.section, C.thBgL, { align: "center", bold: true });
       cv.rect(sx0, y + 30, W - PAD - sx0, 1, C.line);
       ["電信", "聯通", "移動"].forEach(function (n, i) {
-        cv.text(sx0 + colW * (i + 1) - 14, y + 34, n, C.sub, C.thBg, { align: "right" });
-        cv.text(lx0 + colW * (i + 1) - 14, y + 34, n, C.sub, C.thBgL, { align: "right" });
+        cv.text(sx0 + colW * (i + 0.5), y + 34, n, C.sub, C.thBg, { align: "center" });
+        cv.text(lx0 + colW * (i + 0.5), y + 34, n, C.sub, C.thBgL, { align: "center" });
       });
       cv.rect(sx0, y, 1, 60, C.line);
       cv.rect(lx0, y, 1, 60, C.line);
@@ -306,8 +309,8 @@ function renderResult(job, nodeName, r, opts) {
         cv.rect(sx0, y, 1, ROW, C.line);
         cv.rect(lx0, y, 1, ROW, C.line);
         cv.text(PAD + 10, y + 4, line.label, C.text, bgS, { maxW: provW - 16 });
-        line.sCells.forEach(function (c, i) { drawDualCell(c, sx0 + colW * (i + 1), y, bgS); });
-        line.lCells.forEach(function (c, i) { drawDualCell(c, lx0 + colW * (i + 1), y, bgL); });
+        line.sCells.forEach(function (c, i) { drawDualCell(c, sx0 + colW * (i + 0.5), y, bgS); });
+        line.lCells.forEach(function (c, i) { drawDualCell(c, lx0 + colW * (i + 0.5), y, bgL); });
         y += ROW;
       });
       cv.rect(PAD, y, W - 2 * PAD, 1, C.line);
