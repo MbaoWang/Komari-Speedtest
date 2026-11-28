@@ -98,6 +98,8 @@ function scheduleToCron(c) {
   var peakText = peakActive ? "晚高峰 " + pad2(ps) + ":00–" + pad2(pe % 24) + ":00 每" + pStep + "分鐘" : "";
 
   var hour = remote.clampInt(c.schedule_hour, 0, 23, 4);
+  var minute = remote.clampInt(c.schedule_minute, 0, 59, 0);
+  var inPeakSlot = function (h, m) { return peakActive && inPeak(h) && (m % pStep === 0); };
   var specs = [], text = "";
   if (SCHEDULE[mode]) {
     var n = SCHEDULE[mode], base = [];
@@ -105,13 +107,13 @@ function scheduleToCron(c) {
     specs = slotsToCron(base);
     text = mode;
   } else if (mode === "每天") {
-    specs = inPeak(hour) ? [] : slotsToCron([{ h: hour, m: [0] }]);
-    text = "每天 " + pad2(hour) + ":00";
+    specs = inPeakSlot(hour, minute) ? [] : slotsToCron([{ h: hour, m: [minute] }]);
+    text = "每天 " + pad2(hour) + ":" + pad2(minute);
   } else if (mode === "每週" || mode === "每周") {
     var wd = WEEKDAYS.indexOf(String(c.schedule_weekday || "週一").replace("周", "週"));
     if (wd < 0) wd = 1;
-    specs = inPeak(hour) ? [] : slotsToCron([{ h: hour, m: [0] }], wd);
-    text = "每" + WEEKDAYS[wd] + " " + pad2(hour) + ":00";
+    specs = inPeakSlot(hour, minute) ? [] : slotsToCron([{ h: hour, m: [minute] }], wd);
+    text = "每" + WEEKDAYS[wd] + " " + pad2(hour) + ":" + pad2(minute);
   }
   if (peakActive) specs = specs.concat(slotsToCron(peakSlots));
   if (!specs.length) return { specs: [], text: "" };

@@ -479,6 +479,24 @@ test("script.js：定時排程邊界（peak_start === peak_end、跨午夜）與
   assert.ok(cross.specs.length > 0);
   assert.match(cross.text, /22:00–02:00/);
 
+  // 每天 / 每週支援指定分鐘（例如 22:30）
+  const daily30 = scheduleToCron({ schedule: "每天", schedule_hour: 22, schedule_minute: 30 });
+  assert.strictEqual(daily30.specs.length, 1);
+  assert.strictEqual(daily30.text, "每天 22:30（UTC+8）");
+  const expectedMin = (22 * 60 + 30 - 480 + (-new Date().getTimezoneOffset()) + 1440) % 60;
+  assert.strictEqual(Number(daily30.specs[0].split(" ")[0]), expectedMin);
+
+  const weekly15 = scheduleToCron({ schedule: "每週", schedule_weekday: "週五", schedule_hour: 22, schedule_minute: 15 });
+  assert.strictEqual(weekly15.specs.length, 1);
+  assert.strictEqual(weekly15.text, "每週五 22:15（UTC+8）");
+
+  // 晚高峰每30分鐘（:00/:30）已涵蓋 22:30 時不重複排程；22:15 則額外保留
+  const peakDup = scheduleToCron({ schedule: "每天", schedule_hour: 22, schedule_minute: 30, peak_enabled: true, peak_start: 20, peak_end: 24, peak_interval: "每30分鐘" });
+  const peakOnly = scheduleToCron({ schedule: "關閉", peak_enabled: true, peak_start: 20, peak_end: 24, peak_interval: "每30分鐘" });
+  assert.deepStrictEqual([...peakDup.specs], [...peakOnly.specs]);
+  const peakExtra = scheduleToCron({ schedule: "每天", schedule_hour: 22, schedule_minute: 15, peak_enabled: true, peak_start: 20, peak_end: 24, peak_interval: "每30分鐘" });
+  assert.strictEqual(peakExtra.specs.length, peakOnly.specs.length + 1);
+
   // queryParam 遇到無效 % 編碼不拋錯
   assert.strictEqual(queryParam({ url: "/api/plugin/cn-speedtest/image?file=%E0%A4%A" }, "file"), "%E0%A4%A");
   assert.strictEqual(queryParam({ url: "/api/plugin/cn-speedtest/image?file=a%20b.png" }, "file"), "a b.png");

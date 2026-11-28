@@ -13,7 +13,7 @@
     "en": "Test China Telecom/Unicom/Mobile IPv4/IPv6 latency and Taier speedtest from your nodes via the Komari agent, from the admin page or an interactive Telegram bot."
   },
   "author": "MbaoWang",
-  "version": "1.10.9",
+  "version": "1.10.10",
   "url": "https://github.com/MbaoWang/komari-speedtest",
   "komari": ">=1.0.5",
   "entry": "script.js",
@@ -478,10 +478,27 @@
           "en": "Hour (daily / weekly only)"
         },
         "help": {
-          "zh_TW": "填 0~23，北京 / 台北時間，例如 3 = 凌晨 3 點；會自動換算成伺服器時區",
-          "zh_CN": "填 0~23，北京时间，例如 3 = 凌晨 3 点",
-          "zh-CN": "填 0~23，北京时间，例如 3 = 凌晨 3 点",
+          "zh_TW": "填 0~23，北京 / 台北時間，例如 3 = 凌晨 3 點、22 = 晚上 10 點；會自動換算成伺服器時區",
+          "zh_CN": "填 0~23，北京时间，例如 3 = 凌晨 3 点、22 = 晚上 10 点",
+          "zh-CN": "填 0~23，北京时间，例如 3 = 凌晨 3 点、22 = 晚上 10 点",
           "en": "0-23 in UTC+8"
+        }
+      },
+      {
+        "key": "schedule_minute",
+        "type": "number",
+        "default": 0,
+        "name": {
+          "zh_TW": "幾分測（只有選「每天」「每週」才用到）",
+          "zh_CN": "几分测（只有选「每天」「每周」才用到）",
+          "zh-CN": "几分测（只有选「每天」「每周」才用到）",
+          "en": "Minute (daily / weekly only)"
+        },
+        "help": {
+          "zh_TW": "填 0~59，例如幾點測 22 ＋ 幾分測 30 ＝ 晚上 22:30（北京 / 台北時間）",
+          "zh_CN": "填 0~59，例如几点测 22 ＋ 几分测 30 ＝ 晚上 22:30（北京时间）",
+          "zh-CN": "填 0~59，例如几点测 22 ＋ 几分测 30 ＝ 晚上 22:30（北京时间）",
+          "en": "0-59 in UTC+8 (e.g. hour 22 + minute 30 = 22:30)"
         }
       },
       {
