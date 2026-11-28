@@ -13,7 +13,7 @@
     "en": "Test China Telecom/Unicom/Mobile IPv4/IPv6 latency and Taier speedtest from your nodes via the Komari agent, from the admin page or an interactive Telegram bot."
   },
   "author": "MbaoWang",
-  "version": "1.10.10",
+  "version": "1.10.11",
   "url": "https://github.com/MbaoWang/komari-speedtest",
   "komari": ">=1.0.5",
   "entry": "script.js",
@@ -538,24 +538,36 @@
       },
       {
         "key": "peak_start",
-        "type": "number",
-        "default": 20,
+        "type": "string",
+        "default": "20:00",
         "name": {
-          "zh_TW": "晚高峰從幾點開始（0~23，北京 / 台北時間）",
-          "zh_CN": "晚高峰从几点开始（0~23，北京时间）",
-          "zh-CN": "晚高峰从几点开始（0~23，北京时间）",
-          "en": "Peak start hour (UTC+8)"
+          "zh_TW": "晚高峰開始時間（北京 / 台北時間，可填 20、2030 或 20:30）",
+          "zh_CN": "晚高峰开始时间（北京时间，可填 20、2030 或 20:30）",
+          "zh-CN": "晚高峰开始时间（北京时间，可填 20、2030 或 20:30）",
+          "en": "Peak start time (UTC+8, e.g. 20, 2030 or 20:30)"
+        },
+        "help": {
+          "zh_TW": "支援整點、四位數或時:分，例如 20、2030、20:30；會自動換算成伺服器時區",
+          "zh_CN": "支持整点、四位数或时:分，例如 20、2030、20:30",
+          "zh-CN": "支持整点、四位数或时:分，例如 20、2030、20:30",
+          "en": "Hour, HHMM, or HH:MM in UTC+8 (auto-converted to server timezone)"
         }
       },
       {
         "key": "peak_end",
-        "type": "number",
-        "default": 24,
+        "type": "string",
+        "default": "24:00",
         "name": {
-          "zh_TW": "到幾點結束（1~24，不含；24＝半夜 12 點）",
-          "zh_CN": "到几点结束（1~24，不含）",
-          "zh-CN": "到几点结束（1~24，不含）",
-          "en": "Peak end hour (exclusive, 24 = midnight)"
+          "zh_TW": "晚高峰結束時間（不含，可填 24、2330 或 23:30）",
+          "zh_CN": "晚高峰结束时间（不含，可填 24、2330 或 23:30）",
+          "zh-CN": "晚高峰结束时间（不含，可填 24、2330 或 23:30）",
+          "en": "Peak end time (exclusive, e.g. 24, 2330 or 23:30)"
+        },
+        "help": {
+          "zh_TW": "支援整點、四位數或時:分，例如 24（半夜 12 點）、2330、0130（可跨午夜）；結束時間點本身不執行",
+          "zh_CN": "支持整点、四位数或时:分，例如 24（半夜 12 点）、2330、0130（可跨午夜）",
+          "zh-CN": "支持整点、四位数或时:分，例如 24（半夜 12 点）、2330、0130（可跨午夜）",
+          "en": "Hour, HHMM, or HH:MM in UTC+8 (exclusive; supports crossing midnight)"
         }
       },
       {

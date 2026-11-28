@@ -497,6 +497,28 @@ test("script.js：定時排程邊界（peak_start === peak_end、跨午夜）與
   const peakExtra = scheduleToCron({ schedule: "每天", schedule_hour: 22, schedule_minute: 15, peak_enabled: true, peak_start: 20, peak_end: 24, peak_interval: "每30分鐘" });
   assert.strictEqual(peakExtra.specs.length, peakOnly.specs.length + 1);
 
+  // 晚高峰支援 HH:MM（含全形冒號、跨午夜與同起訖不展開）
+  const peakHM = scheduleToCron({ schedule: "關閉", peak_enabled: true, peak_start: "20:30", peak_end: "23:30", peak_interval: "每30分鐘" });
+  assert.strictEqual(peakHM.text, "晚高峰 20:30–23:30 每30分鐘（UTC+8）");
+  assert.strictEqual(peakHM.specs.length, 2); // :30（20,21,22）與 :00（21,22,23）各一條
+  const peakCrossHM = scheduleToCron({ schedule: "關閉", peak_enabled: true, peak_start: "22：30", peak_end: "01:30", peak_interval: "每30分鐘" });
+  assert.strictEqual(peakCrossHM.text, "晚高峰 22:30–01:30 每30分鐘（UTC+8）");
+  const totalSlots = peakCrossHM.specs.reduce((sum, sp) => {
+    const [ms, hs] = sp.split(" ");
+    return sum + ms.split(",").length * hs.split(",").length;
+  }, 0);
+  assert.strictEqual(totalSlots, 6); // 22:30, 23:00, 23:30, 00:00, 00:30, 01:00
+  const peakEqHM = scheduleToCron({ schedule: "關閉", peak_enabled: true, peak_start: "22:30", peak_end: "22:30", peak_interval: "每30分鐘" });
+  assert.deepStrictEqual([...peakEqHM.specs], []);
+  // 非整點／半點分鐘（如 2020 到 2130，不需冒號或空白）：20:20, 20:50, 21:20 共 3 次
+  const peak2020 = scheduleToCron({ schedule: "關閉", peak_enabled: true, peak_start: "2020", peak_end: "2130", peak_interval: "每30分鐘" });
+  assert.strictEqual(peak2020.text, "晚高峰 20:20–21:30 每30分鐘（UTC+8）");
+  const slots2020 = peak2020.specs.reduce((sum, sp) => {
+    const [ms, hs] = sp.split(" ");
+    return sum + ms.split(",").length * hs.split(",").length;
+  }, 0);
+  assert.strictEqual(slots2020, 3); // 20:20, 20:50, 21:20
+
   // queryParam 遇到無效 % 編碼不拋錯
   assert.strictEqual(queryParam({ url: "/api/plugin/cn-speedtest/image?file=%E0%A4%A" }, "file"), "%E0%A4%A");
   assert.strictEqual(queryParam({ url: "/api/plugin/cn-speedtest/image?file=a%20b.png" }, "file"), "a b.png");

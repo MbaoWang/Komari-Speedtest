@@ -51,6 +51,27 @@ var SCHEDULE = {
 };
 var WEEKDAYS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
 function pad2(n) { return (n < 10 ? "0" : "") + n; }
+function fmtHM(mins) { var m = ((mins % 1440) + 1440) % 1440; return pad2(Math.floor(m / 60)) + ":" + pad2(m % 60); }
+function parseHM(v, defMin, allow24) {
+  if (v === undefined || v === null) return defMin;
+  var s = String(v).trim().replace("：", ":");
+  if (!s) return defMin;
+  var h, min = 0;
+  var m = s.match(/^(\d{1,2})(?:(?:\s*:\s*|\s+)(\d{1,2}))?$/);
+  if (m) {
+    h = parseInt(m[1], 10);
+    min = m[2] !== undefined ? parseInt(m[2], 10) : 0;
+  } else if (/^\d{3,4}$/.test(s)) {
+    h = parseInt(s.slice(0, -2), 10);
+    min = parseInt(s.slice(-2), 10);
+  } else {
+    return defMin;
+  }
+  if (allow24 && h >= 24) return 1440;
+  if (h > 23) h = 23;
+  if (min > 59) min = 59;
+  return h * 60 + min;
+}
 
 // slots：[{ h: 北京小時, m: [分鐘...] }] → 依伺服器時區換算、把分鐘相同的時段合併成 cron
 function slotsToCron(slots, dow) {
@@ -86,33 +107,42 @@ function scheduleToCron(c) {
   if (!mode) return customList.length ? { specs: customList, text: "自訂 " + customList.join("；") } : { specs: [], text: "" };
   if (mode === "自訂" || mode === "自定义") return customList.length ? { specs: customList, text: "自訂 " + customList.join("；") } : { specs: [], text: "" };
 
-  // 晚高峰加密
+  // 晚高峰加密（支援整點或 HH:MM，例如 20、20:30、23:30、01:30）
   var peak = bool(c.peak_enabled, false);
-  var ps = remote.clampInt(c.peak_start, 0, 23, 20);
-  var pe = remote.clampInt(c.peak_end, 1, 24, 24);
+  var ps = parseHM(c.peak_start, 20 * 60, false);
+  var pe = parseHM(c.peak_end, 24 * 60, true);
   var pStep = /15/.test(String(c.peak_interval || "")) ? 15 : 30;
-  var inPeak = function (h) { return peak && (ps === pe ? false : ps < pe ? h >= ps && h < pe : h >= ps || h < pe); };
-  var peakSlots = [];
-  if (peak) for (var h = 0; h < 24; h++) if (inPeak(h)) { var ms = []; for (var m = 0; m < 60; m += pStep) ms.push(m); peakSlots.push({ h: h, m: ms }); }
-  var peakActive = peak && peakSlots.length > 0;
-  var peakText = peakActive ? "晚高峰 " + pad2(ps) + ":00–" + pad2(pe % 24) + ":00 每" + pStep + "分鐘" : "";
+  var pDur = peak ? (ps === pe ? 0 : ps < pe ? pe - ps : 1440 - ps + pe) : 0;
+  var inPeakRange = function (t) { return pDur > 0 && (((t - (ps % 1440) + 1440) % 1440) < pDur); };
+  var peakSlots = [], peakSet = {};
+  if (pDur > 0) {
+    var byH = {};
+    for (var off = 0; off < pDur; off += pStep) {
+      var tm = (ps + off) % 1440;
+      peakSet[tm] = true;
+      var ph = Math.floor(tm / 60), pm = tm % 60;
+      (byH[ph] = byH[ph] || []).push(pm);
+    }
+    Object.keys(byH).forEach(function (h) { peakSlots.push({ h: Number(h), m: byH[h] }); });
+  }
+  var peakActive = peakSlots.length > 0;
+  var peakText = peakActive ? "晚高峰 " + fmtHM(ps) + "–" + fmtHM(pe) + " 每" + pStep + "分鐘" : "";
 
   var hour = remote.clampInt(c.schedule_hour, 0, 23, 4);
   var minute = remote.clampInt(c.schedule_minute, 0, 59, 0);
-  var inPeakSlot = function (h, m) { return peakActive && inPeak(h) && (m % pStep === 0); };
   var specs = [], text = "";
   if (SCHEDULE[mode]) {
     var n = SCHEDULE[mode], base = [];
-    for (var b = 0; b < 24; b += n) if (!inPeak(b)) base.push({ h: b, m: [0] });
+    for (var b = 0; b < 24; b += n) if (!inPeakRange(b * 60)) base.push({ h: b, m: [0] });
     specs = slotsToCron(base);
     text = mode;
   } else if (mode === "每天") {
-    specs = inPeakSlot(hour, minute) ? [] : slotsToCron([{ h: hour, m: [minute] }]);
+    specs = peakSet[hour * 60 + minute] ? [] : slotsToCron([{ h: hour, m: [minute] }]);
     text = "每天 " + pad2(hour) + ":" + pad2(minute);
   } else if (mode === "每週" || mode === "每周") {
     var wd = WEEKDAYS.indexOf(String(c.schedule_weekday || "週一").replace("周", "週"));
     if (wd < 0) wd = 1;
-    specs = inPeakSlot(hour, minute) ? [] : slotsToCron([{ h: hour, m: [minute] }], wd);
+    specs = peakSet[hour * 60 + minute] ? [] : slotsToCron([{ h: hour, m: [minute] }], wd);
     text = "每" + WEEKDAYS[wd] + " " + pad2(hour) + ":" + pad2(minute);
   }
   if (peakActive) specs = specs.concat(slotsToCron(peakSlots));
